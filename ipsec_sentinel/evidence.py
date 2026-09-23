@@ -3,7 +3,14 @@ from __future__ import annotations
 from dataclasses import dataclass
 import re
 
-from ipsec_sentinel.models import CaptureEvidence, Check, StageRecord, TrafficEvidence, Verification
+from ipsec_sentinel.models import (
+    CaptureEvidence,
+    Check,
+    PfsObservation,
+    StageRecord,
+    TrafficEvidence,
+    Verification,
+)
 
 
 @dataclass(frozen=True)
@@ -28,8 +35,11 @@ class XfrmEvidence:
 
 
 def parse_sa(text: str) -> SaEvidence:
-    child_match = re.search(r"child-sas \{.*?\{(.*?)\}\}\}", text)
-    child = child_match.group(1) if child_match else ""
+    children = re.findall(r"protected-nets-\d+ \{([^{}]+)\}", text)
+    child = next(
+        (candidate for candidate in reversed(children) if _field(candidate, "state") == "INSTALLED"),
+        children[-1] if children else "",
+    )
     return SaEvidence(
         ike_state=_field(text, "state"),
         child_state=_field(child, "state"),
@@ -91,6 +101,31 @@ def parse_ping(text: str) -> TrafficEvidence:
     return TrafficEvidence("ICMP", sent, received, sent > 0 and sent == received)
 
 
+def evaluate_pfs(
+    before_sas: dict[str, str],
+    after_sas: dict[str, str] | None,
+    log_segment: str,
+    *,
+    attempted: bool,
+) -> PfsObservation:
+    if not attempted:
+        return PfsObservation.not_tested()
+    after_sas = after_sas or {}
+    changes: list[str] = []
+    changed = True
+    for gateway in ("gateway-a", "gateway-b"):
+        before = parse_sa(before_sas.get(gateway, "")).spis
+        after = parse_sa(after_sas.get(gateway, "")).spis
+        gateway_changed = bool(all(before) and all(after) and before != after)
+        changed = changed and gateway_changed
+        changes.append(f"{gateway} SPIs {before} -> {after}")
+    selected = "selected proposal: ESP:AES_GCM_16_256/ECP_384/NO_EXT_SEQ"
+    fresh_dh = selected in log_segment
+    status = "VERIFIED" if changed and fresh_dh else "NOT_VERIFIED"
+    evidence = tuple(changes + [f"fresh_dh_selected={fresh_dh}", selected if fresh_dh else "fresh DH selection missing"])
+    return PfsObservation(status=status, rekey_observed=True, evidence=evidence)
+
+
 def evaluate_baseline(
     sas: dict[str, str],
     xfrm: dict[str, str],
@@ -98,6 +133,7 @@ def evaluate_baseline(
     capture: CaptureEvidence,
     *,
     run_id: str = "",
+    pfs: PfsObservation | None = None,
 ) -> Verification:
     checks: list[Check] = []
     expected = {
@@ -155,6 +191,14 @@ def evaluate_baseline(
             ),
         )
     )
+    if pfs is not None:
+        checks.append(
+            _check(
+                "pfs.rekey_fresh_dh",
+                pfs.status == "VERIFIED" and pfs.rekey_observed,
+                pfs.status,
+            )
+        )
     status = "PASS" if all(check.passed for check in checks) else "FAIL"
     failed = [check.name for check in checks if not check.passed]
     message = "all required checks passed" if not failed else ", ".join(failed)

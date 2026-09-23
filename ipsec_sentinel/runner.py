@@ -17,17 +17,16 @@ from ipsec_sentinel.artifacts import (
 )
 from ipsec_sentinel.capture import CaptureSession, validate_pcap
 from ipsec_sentinel.command import run_checked
-from ipsec_sentinel.evidence import evaluate_baseline, parse_ping, parse_sa
+from ipsec_sentinel.evidence import evaluate_baseline, evaluate_pfs, parse_ping, parse_sa
 from ipsec_sentinel.models import (
     ConfiguredPolicy,
     GroundTruth,
     ObservedState,
-    PfsObservation,
     StageRecord,
     Verification,
 )
 from ipsec_sentinel.scenario import Scenario
-from ipsec_sentinel.strongswan import StrongSwanPair
+from ipsec_sentinel.strongswan import RekeyEvidence, StrongSwanPair
 from ipsec_sentinel.topology import Topology
 
 
@@ -43,6 +42,7 @@ ORDERED_STAGES = (
     "sa_wait",
     "xfrm_collection",
     "icmp",
+    "pfs_rekey",
     "capture_stop",
     "pcap_validation",
     "verdict",
@@ -189,6 +189,16 @@ def run_secure_baseline(
         )
         context["ping"] = result.stdout
 
+    def pfs_rekey() -> None:
+        rekey = pair.rekey()
+        context["rekey"] = rekey
+        context["pfs"] = evaluate_pfs(
+            rekey.before_sas,
+            rekey.after_sas,
+            rekey.log_segment,
+            attempted=rekey.attempted,
+        )
+
     def capture_stop() -> None:
         capture.stop()
         context["capture_ended_at"] = time()
@@ -211,6 +221,7 @@ def run_secure_baseline(
             context["ping"],  # type: ignore[arg-type]
             context["capture"],  # type: ignore[arg-type]
             run_id=run_id,
+            pfs=context["pfs"],  # type: ignore[arg-type]
         )
         context["verification"] = verification
         if verification.status != "PASS":
@@ -238,7 +249,7 @@ def run_secure_baseline(
                 ike_version=2,
                 ike_proposal=sa.ike_proposal,
                 esp_proposal=f"{sa.esp_proposal}/NO_EXT_SEQ",
-                pfs=PfsObservation.not_tested(),
+                pfs=context["pfs"],  # type: ignore[arg-type]
             ),
             traffic=parse_ping(context["ping"]),  # type: ignore[arg-type]
             capture=context["capture"],  # type: ignore[arg-type]
@@ -254,6 +265,7 @@ def run_secure_baseline(
             verification=context["verification"],  # type: ignore[arg-type]
             ground_truth=context["ground_truth"],  # type: ignore[arg-type]
         )
+        _write_rekey_artifacts(run_dir, context.get("rekey"))
 
     def cleanup() -> None:
         capture.stop()
@@ -273,6 +285,7 @@ def run_secure_baseline(
         "sa_wait": sa_wait,
         "xfrm_collection": xfrm_collection,
         "icmp": icmp,
+        "pfs_rekey": pfs_rekey,
         "capture_stop": capture_stop,
         "pcap_validation": pcap_validation,
         "verdict": verdict,
@@ -338,4 +351,20 @@ def _publish_failure_artifacts(
                 write_text_atomic(run_dir / f"{prefix}-{gateway}.txt", str(value))
     if temporary_pcap.is_file() and not (run_dir / "encrypted.pcap").exists():
         shutil.move(str(temporary_pcap), run_dir / "encrypted.pcap")
+    _write_rekey_artifacts(run_dir, context.get("rekey"))
     publish_results(run_dir, verification, truth)
+
+
+def _write_rekey_artifacts(run_dir: Path, value: object) -> None:
+    if not isinstance(value, RekeyEvidence):
+        return
+    write_text_atomic(run_dir / "pfs-rekey.log", value.log_segment)
+    for gateway in ("gateway-a", "gateway-b"):
+        write_text_atomic(
+            run_dir / f"swanctl-before-rekey-{gateway}.txt",
+            value.before_sas[gateway],
+        )
+        write_text_atomic(
+            run_dir / f"swanctl-after-rekey-{gateway}.txt",
+            value.after_sas[gateway],
+        )

@@ -30,10 +30,12 @@ class SecureBaselineIntegrationTest(unittest.TestCase):
                 json.loads((run_dir / "verification.json").read_text())["status"],
                 "PASS",
             )
-            self.assertEqual(
-                json.loads((run_dir / "ground_truth.json").read_text())["status"],
-                "PASS",
-            )
+            truth = json.loads((run_dir / "ground_truth.json").read_text())
+            self.assertEqual(truth["status"], "PASS")
+            self.assertEqual(truth["observed"]["pfs"]["status"], "VERIFIED")
+            self.assertTrue(truth["observed"]["pfs"]["rekey_observed"])
+            self.assertGreaterEqual(truth["capture"]["esp_packets"], 10)
+            self.assertGreaterEqual(truth["capture"]["ike_packets"], 6)
             namespaces = subprocess.run(
                 ["ip", "netns", "list"],
                 check=True,

@@ -1,7 +1,13 @@
 from pathlib import Path
 import unittest
 
-from ipsec_sentinel.evidence import evaluate_baseline, parse_ping, parse_sa, parse_xfrm
+from ipsec_sentinel.evidence import (
+    evaluate_baseline,
+    evaluate_pfs,
+    parse_ping,
+    parse_sa,
+    parse_xfrm,
+)
 from ipsec_sentinel.models import CaptureEvidence
 
 
@@ -27,6 +33,44 @@ def baseline_inputs():
 
 
 class EvidenceParsingTest(unittest.TestCase):
+    def test_pfs_is_not_tested_by_initial_child_establishment(self) -> None:
+        sas, _, _, _ = baseline_inputs()
+
+        observation = evaluate_pfs(sas, None, "", attempted=False)
+
+        self.assertEqual(observation.status, "NOT_TESTED")
+        self.assertFalse(observation.rekey_observed)
+
+    def test_pfs_requires_changed_spis_and_fresh_dh_selection(self) -> None:
+        before, _, _, _ = baseline_inputs()
+        after = {
+            gateway: text.replace("c2ad5304", "a1a2a3a4").replace("cbecd5e6", "b1b2b3b4")
+            for gateway, text in before.items()
+        }
+        log = "selected proposal: ESP:AES_GCM_16_256/ECP_384/NO_EXT_SEQ\n"
+
+        verified = evaluate_pfs(before, after, log, attempted=True)
+        no_dh = evaluate_pfs(before, after, "selected proposal: ESP:AES_GCM_16_256/NO_EXT_SEQ", attempted=True)
+        unchanged = evaluate_pfs(before, before, log, attempted=True)
+
+        self.assertEqual(verified.status, "VERIFIED")
+        self.assertTrue(verified.rekey_observed)
+        self.assertEqual(no_dh.status, "NOT_VERIFIED")
+        self.assertEqual(unchanged.status, "NOT_VERIFIED")
+
+    def test_parser_uses_new_installed_child_while_old_child_is_deleted(self) -> None:
+        text = (
+            "state=ESTABLISHED child-sas {"
+            "protected-nets-1 {name=protected-nets state=DELETED spi-in=11111111 spi-out=22222222} "
+            "protected-nets-2 {name=protected-nets state=INSTALLED spi-in=33333333 spi-out=44444444}"
+            "}}"
+        )
+
+        parsed = parse_sa(text)
+
+        self.assertEqual(parsed.child_state, "INSTALLED")
+        self.assertEqual(parsed.spis, ("33333333", "44444444"))
+
     def test_parses_required_sa_xfrm_and_ping_fields(self) -> None:
         sa = parse_sa(fixture("swanctl-gateway-a.txt"))
         xfrm = parse_xfrm(fixture("xfrm-gateway-a.txt"))

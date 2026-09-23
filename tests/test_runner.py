@@ -21,6 +21,8 @@ class RunnerOrderTest(unittest.TestCase):
         self.assertEqual(tuple(observed), ORDERED_STAGES)
         self.assertTrue(all(record.status == "PASS" for record in records))
         self.assertLess(observed.index("capture_start"), observed.index("initiate"))
+        self.assertLess(observed.index("icmp"), observed.index("pfs_rekey"))
+        self.assertLess(observed.index("pfs_rekey"), observed.index("capture_stop"))
 
     def test_every_failure_stops_that_layer_and_still_cleans_up(self) -> None:
         for failed_stage in ORDERED_STAGES[:-1]:

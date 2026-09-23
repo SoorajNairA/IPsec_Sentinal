@@ -29,12 +29,14 @@ class CaptureSession:
         namespace: str = "ips-gwa",
         interface: str = "wan0",
         timeout: float = 5,
+        drain_seconds: float = 0.25,
     ) -> None:
         self.pcap_path = pcap_path
         self.log_path = log_path
         self.namespace = namespace
         self.interface = interface
         self.timeout = timeout
+        self.drain_seconds = drain_seconds
         self._process: subprocess.Popen[str] | None = None
         self._log: TextIO | None = None
 
@@ -58,6 +60,7 @@ class CaptureSession:
                 "exec",
                 self.namespace,
                 "tcpdump",
+                "--immediate-mode",
                 "-U",
                 "-n",
                 "-i",
@@ -88,6 +91,7 @@ class CaptureSession:
             return
         process = self._process
         if process.poll() is None:
+            sleep(self.drain_seconds)
             process.send_signal(signal.SIGINT)
             try:
                 process.wait(timeout=self.timeout)

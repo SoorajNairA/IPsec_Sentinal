@@ -6,6 +6,7 @@ from pathlib import Path
 from time import monotonic, sleep
 from typing import TextIO
 import os
+import re
 import signal
 import subprocess
 
@@ -30,6 +31,15 @@ class GatewayFiles:
     @property
     def vici_uri(self) -> str:
         return f"unix://{self.socket}"
+
+
+@dataclass(frozen=True)
+class RekeyEvidence:
+    attempted: bool
+    completed: bool
+    before_sas: dict[str, str]
+    after_sas: dict[str, str]
+    log_segment: str
 
 
 @dataclass(frozen=True)
@@ -145,10 +155,31 @@ class StrongSwanPair:
             for name in self.files
         }
 
-    def rekey(self) -> str:
-        return self._swanctl(
-            "gateway-a", "--rekey", "--child", "protected-nets"
-        ).stdout
+    def rekey(self) -> RekeyEvidence:
+        before = self.list_sas()
+        log_path = self.files["gateway-a"].log
+        offset = log_path.stat().st_size if log_path.exists() else 0
+        self._swanctl("gateway-a", "--rekey", "--child", "protected-nets")
+        deadline = monotonic() + self.timeout
+        after = before
+        completed = False
+        while monotonic() < deadline:
+            after = self.list_sas()
+            completed = all(
+                "state=INSTALLED" in after.get(gateway, "")
+                and _spis(after.get(gateway, ""))
+                and _spis(after.get(gateway, "")) != _spis(before.get(gateway, ""))
+                for gateway in ("gateway-a", "gateway-b")
+            )
+            if completed:
+                break
+            sleep(0.1)
+        segment = ""
+        if log_path.exists():
+            with log_path.open("rb") as log_file:
+                log_file.seek(offset)
+                segment = log_file.read().decode("utf-8", errors="replace")
+        return RekeyEvidence(True, completed, before, after, segment)
 
     def stop(self) -> None:
         for name, process in tuple(self._processes.items()):
@@ -260,3 +291,7 @@ secrets {{
     }}
 }}
 """
+
+
+def _spis(text: str) -> frozenset[str]:
+    return frozenset(re.findall(r"spi-(?:in|out)=([0-9a-fA-F]+)", text))
