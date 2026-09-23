@@ -1,0 +1,22 @@
+STATE
+src 192.0.2.2 dst 192.0.2.1
+	proto esp spi 0xc2ad5304 reqid 1 mode tunnel
+	aead rfc4106(gcm(aes)) 0x44556677 128
+	dir out
+src 192.0.2.1 dst 192.0.2.2
+	proto esp spi 0xcbecd5e6 reqid 1 mode tunnel
+	aead rfc4106(gcm(aes)) 0x00112233 128
+	dir in
+POLICY
+src 10.20.0.0/24 dst 10.10.0.0/24
+	dir out priority 375423 ptype main
+	tmpl src 192.0.2.2 dst 192.0.2.1
+		proto esp spi 0xc2ad5304 reqid 1 mode tunnel
+src 10.10.0.0/24 dst 10.20.0.0/24
+	dir fwd priority 375423 ptype main
+	tmpl src 192.0.2.1 dst 192.0.2.2
+		proto esp reqid 1 mode tunnel
+src 10.10.0.0/24 dst 10.20.0.0/24
+	dir in priority 375423 ptype main
+	tmpl src 192.0.2.1 dst 192.0.2.2
+		proto esp reqid 1 mode tunnel
