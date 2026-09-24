@@ -158,6 +158,16 @@ class Manifest:
     def close(self) -> None:
         self.connection.close()
 
+    @classmethod
+    def open_existing(cls, path: Path) -> "Manifest":
+        if not path.is_file():
+            raise FileNotFoundError(f"manifest does not exist: {path}")
+        manifest = cls(path)
+        if manifest.connection.execute("PRAGMA user_version").fetchone()[0] != MANIFEST_SCHEMA_VERSION:
+            manifest.close()
+            raise ValueError("unsupported manifest schema version")
+        return manifest
+
     def _exclusive(self, operation: Callable[[], T]) -> T:
         self.connection.execute("BEGIN IMMEDIATE")
         try:
@@ -475,6 +485,20 @@ class Manifest:
             "SELECT * FROM attempts ORDER BY slot_id,attempt_number"
         ).fetchall()
         return tuple(self._attempt_record(row) for row in rows)
+
+    def training_ready_attempts(self) -> tuple[AttemptRecord, ...]:
+        return tuple(
+            attempt
+            for attempt in self.attempts()
+            if attempt.state is RunState.PASS and attempt.training_ready
+        )
+
+    def count_attempts(self, state: RunState) -> int:
+        return int(
+            self.connection.execute(
+                "SELECT COUNT(*) FROM attempts WHERE state=?", (state.value,)
+            ).fetchone()[0]
+        )
 
     def latest_attempt(self, slot_id: str) -> AttemptRecord | None:
         row = self.connection.execute(
