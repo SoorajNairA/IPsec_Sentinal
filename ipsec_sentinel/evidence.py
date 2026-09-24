@@ -170,15 +170,7 @@ def evaluate_pfs(
     return PfsObservation(status=status, rekey_observed=True, evidence=evidence)
 
 
-def evaluate_baseline(
-    sas: dict[str, str],
-    xfrm: dict[str, str],
-    ping: str,
-    capture: CaptureEvidence,
-    *,
-    run_id: str = "",
-    pfs: PfsObservation | None = None,
-) -> Verification:
+def _sa_xfrm_checks(sas: dict[str, str], xfrm: dict[str, str]) -> list[Check]:
     checks: list[Check] = []
     parsed_sas = {
         gateway: parse_sa(sas.get(gateway, ""))
@@ -234,28 +226,23 @@ def evaluate_baseline(
             )
         )
 
-    traffic = parse_ping(ping)
-    checks.extend(
-        (
-            _check("traffic.icmp", traffic.success and traffic.sent == 5, f"{traffic.received}/{traffic.sent}"),
-            _check("capture.ike", capture.ike_packets > 0, str(capture.ike_packets)),
-            _check("capture.esp", capture.esp_packets > 0, str(capture.esp_packets)),
-            _check("capture.natt_absent", capture.natt_packets == 0, str(capture.natt_packets)),
-            _check(
-                "capture.cleartext_absent",
-                capture.cleartext_packets == 0,
-                str(capture.cleartext_packets),
-            ),
-        )
-    )
-    if pfs is not None:
-        checks.append(
-            _check(
-                "pfs.rekey_fresh_dh",
-                pfs.status == "VERIFIED" and pfs.rekey_observed,
-                pfs.status,
-            )
-        )
+    return checks
+
+
+def _capture_checks(capture: CaptureEvidence) -> list[Check]:
+    return [
+        _check("capture.ike", capture.ike_packets > 0, str(capture.ike_packets)),
+        _check("capture.esp", capture.esp_packets > 0, str(capture.esp_packets)),
+        _check("capture.natt_absent", capture.natt_packets == 0, str(capture.natt_packets)),
+        _check(
+            "capture.cleartext_absent",
+            capture.cleartext_packets == 0,
+            str(capture.cleartext_packets),
+        ),
+    ]
+
+
+def _verification(run_id: str, checks: list[Check]) -> Verification:
     status = "PASS" if all(check.passed for check in checks) else "FAIL"
     failed = [check.name for check in checks if not check.passed]
     message = "all required checks passed" if not failed else ", ".join(failed)
@@ -265,6 +252,63 @@ def evaluate_baseline(
         stages=(StageRecord("verdict", status, message),),
         checks=tuple(checks),
     )
+
+
+def evaluate_tunnel(
+    sas: dict[str, str], xfrm: dict[str, str], *, run_id: str = ""
+) -> Verification:
+    return _verification(run_id, _sa_xfrm_checks(sas, xfrm))
+
+
+def evaluate_ipsec(
+    sas: dict[str, str],
+    xfrm: dict[str, str],
+    capture: CaptureEvidence,
+    *,
+    run_id: str = "",
+    pfs: PfsObservation | None = None,
+) -> Verification:
+    checks = list(evaluate_tunnel(sas, xfrm, run_id=run_id).checks)
+    checks.extend(_capture_checks(capture))
+    if pfs is not None:
+        checks.append(
+            _check(
+                "pfs.rekey_fresh_dh",
+                pfs.status == "VERIFIED" and pfs.rekey_observed,
+                pfs.status,
+            )
+        )
+    return _verification(run_id, checks)
+
+
+def evaluate_baseline(
+    sas: dict[str, str],
+    xfrm: dict[str, str],
+    ping: str,
+    capture: CaptureEvidence,
+    *,
+    run_id: str = "",
+    pfs: PfsObservation | None = None,
+) -> Verification:
+    checks = _sa_xfrm_checks(sas, xfrm)
+    traffic = parse_ping(ping)
+    checks.append(
+        _check(
+            "traffic.icmp",
+            traffic.success and traffic.sent == 5,
+            f"{traffic.received}/{traffic.sent}",
+        )
+    )
+    checks.extend(_capture_checks(capture))
+    if pfs is not None:
+        checks.append(
+            _check(
+                "pfs.rekey_fresh_dh",
+                pfs.status == "VERIFIED" and pfs.rekey_observed,
+                pfs.status,
+            )
+        )
+    return _verification(run_id, checks)
 
 
 def _field(text: str, name: str) -> str:

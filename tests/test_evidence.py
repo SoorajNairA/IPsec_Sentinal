@@ -3,12 +3,14 @@ import unittest
 
 from ipsec_sentinel.evidence import (
     evaluate_baseline,
+    evaluate_ipsec,
     evaluate_pfs,
+    evaluate_tunnel,
     parse_ping,
     parse_sa,
     parse_xfrm,
 )
-from ipsec_sentinel.models import CaptureEvidence
+from ipsec_sentinel.models import CaptureEvidence, PfsObservation
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -33,6 +35,18 @@ def baseline_inputs():
 
 
 class EvidenceParsingTest(unittest.TestCase):
+    def test_ipsec_evaluator_does_not_require_an_icmp_workload(self) -> None:
+        sas, xfrm, _, capture = baseline_inputs()
+        pfs = PfsObservation("VERIFIED", True, ("fresh ECP_384 DH",))
+        tunnel = evaluate_tunnel(sas, xfrm, run_id="dataset-run")
+        self.assertEqual(tunnel.status, "PASS")
+        verification = evaluate_ipsec(
+            sas, xfrm, capture, run_id="dataset-run", pfs=pfs
+        )
+        self.assertEqual(verification.status, "PASS")
+        self.assertNotIn("traffic.icmp", {check.name for check in verification.checks})
+        self.assertTrue(all(check.passed for check in verification.checks))
+
     def test_pfs_is_not_tested_by_initial_child_establishment(self) -> None:
         sas, _, _, _ = baseline_inputs()
 
