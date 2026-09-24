@@ -5,9 +5,6 @@ from dataclasses import replace
 from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
-from time import monotonic, sleep, time
-import os
-import shutil
 
 from ipsec_sentinel.artifacts import (
     create_run_dir,
@@ -15,14 +12,8 @@ from ipsec_sentinel.artifacts import (
     write_success_artifacts,
     write_text_atomic,
 )
-from ipsec_sentinel.capture import (
-    AUDIT_FILTER,
-    CaptureSession,
-    validate_pcap,
-    validate_wire_cleartext,
-)
 from ipsec_sentinel.command import run_checked
-from ipsec_sentinel.evidence import evaluate_baseline, evaluate_pfs, parse_ping, parse_sa
+from ipsec_sentinel.evidence import evaluate_baseline, parse_ping, parse_sa
 from ipsec_sentinel.models import (
     ConfiguredPolicy,
     GroundTruth,
@@ -31,8 +22,7 @@ from ipsec_sentinel.models import (
     Verification,
 )
 from ipsec_sentinel.scenario import Scenario
-from ipsec_sentinel.strongswan import RekeyEvidence, StrongSwanPair
-from ipsec_sentinel.topology import Topology
+from ipsec_sentinel.session import SecureSession, run_cleanup_steps
 
 
 ORDERED_STAGES = (
@@ -89,19 +79,6 @@ def execute_ordered_stages(
     return tuple(records)
 
 
-def run_cleanup_steps(
-    steps: tuple[tuple[str, Callable[[], None]], ...],
-) -> None:
-    errors: list[str] = []
-    for name, action in steps:
-        try:
-            action()
-        except BaseException as error:
-            errors.append(f"{name}: {error}")
-    if errors:
-        raise RuntimeError("cleanup errors: " + "; ".join(errors))
-
-
 def run_secure_baseline(
     scenario: str | Path,
     keep_lab: bool = False,
@@ -111,249 +88,99 @@ def run_secure_baseline(
     run_dir = create_run_dir(runs_root, datetime.now(timezone.utc))
     run_id = run_dir.name
     log = StringIO()
-    topology = Topology(log)
-    pair = StrongSwanPair(log)
-    capture_runtime = Path("/run/ipsec-sentinel") / run_id / "capture"
-    temporary_pcaps = {
-        "encrypted": capture_runtime / "encrypted.pcap",
-        "gateway-a": capture_runtime / "cleartext-audit-gateway-a.pcap",
-        "gateway-b": capture_runtime / "cleartext-audit-gateway-b.pcap",
-    }
-    captures = {
-        "encrypted": CaptureSession(
-            temporary_pcaps["encrypted"], run_dir / "tcpdump.log"
-        ),
-        "gateway-a": CaptureSession(
-            temporary_pcaps["gateway-a"],
-            run_dir / "tcpdump-audit-gateway-a.log",
-            capture_filter=AUDIT_FILTER,
-        ),
-        "gateway-b": CaptureSession(
-            temporary_pcaps["gateway-b"],
-            run_dir / "tcpdump-audit-gateway-b.log",
-            namespace="ips-gwb",
-            capture_filter=AUDIT_FILTER,
-        ),
-    }
+    session = SecureSession(
+        run_dir, log, primary_capture_name="encrypted.pcap", keep_lab=keep_lab
+    )
     context: dict[str, object] = {}
 
-    def preflight() -> None:
-        if os.geteuid() != 0:
-            raise PermissionError("IPsec Sentinel must run as Linux root")
-        for program in ("ip", "swanctl", "charon-systemd", "tcpdump", "ping"):
-            if shutil.which(program) is None:
-                raise RuntimeError(f"required program is missing: {program}")
-        run_checked(["ip", "xfrm", "state"], 5, log)
-        run_checked(["ip", "xfrm", "policy"], 5, log)
-        if not Path("/proc/net/xfrm_stat").is_file():
-            raise RuntimeError("kernel XFRM statistics are unavailable")
-        if "rfc4106(gcm(aes))" not in Path("/proc/crypto").read_text(encoding="utf-8"):
-            raise RuntimeError("kernel RFC 4106 AES-GCM support is unavailable")
-
-    def reset() -> None:
-        topology.reset()
-
     def scenario_load() -> None:
-        path = _scenario_path(scenario)
-        context["scenario_path"] = path
-        context["scenario_yaml"] = path.read_text(encoding="utf-8")
-        context["scenario"] = Scenario.load(path)
-
-    def topology_setup_readback() -> None:
-        topology.setup()
-        checks = topology.verify()
-        failures = [check.name for check in checks if not check.passed]
-        if failures:
-            raise RuntimeError(f"topology readback failed: {', '.join(failures)}")
-        context["topology_checks"] = checks
-
-    def daemon_start() -> None:
-        pair.start(run_dir)
-
-    def capture_start() -> None:
-        capture_runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
-        os.chmod(capture_runtime, 0o700)
-        context["capture_started_at"] = time()
-        for capture in captures.values():
-            capture.start()
-
-    def configuration_load() -> None:
-        context["load"] = pair.load()
-
-    def initiate() -> None:
-        context["initiate"] = pair.initiate()
-
-    def sa_wait() -> None:
-        deadline = monotonic() + 10
-        last: dict[str, str] = {}
-        while monotonic() < deadline:
-            last = pair.list_sas()
-            if all(
-                parse_sa(last[gateway]).ike_state == "ESTABLISHED"
-                and parse_sa(last[gateway]).child_state == "INSTALLED"
-                for gateway in ("gateway-a", "gateway-b")
-            ):
-                context["sas"] = last
-                return
-            sleep(0.1)
-        context["sas"] = last
-        raise TimeoutError("IKE and CHILD SAs did not become established")
-
-    def xfrm_collection() -> None:
-        evidence: dict[str, str] = {}
-        for gateway, namespace in (("gateway-a", "ips-gwa"), ("gateway-b", "ips-gwb")):
-            state = run_checked(
-                ["ip", "netns", "exec", namespace, "ip", "xfrm", "state"],
-                5,
-                log,
-            ).stdout
-            policy = run_checked(
-                ["ip", "netns", "exec", namespace, "ip", "xfrm", "policy"],
-                5,
-                log,
-            ).stdout
-            evidence[gateway] = f"STATE\n{state}POLICY\n{policy}"
-        context["xfrm"] = evidence
+        context["scenario"] = session.load_scenario(scenario)
+        context["scenario_yaml"] = session.scenario_yaml
 
     def icmp() -> None:
         loaded = context["scenario"]
         assert isinstance(loaded, Scenario)
         result = run_checked(
             [
-                "ip", "netns", "exec", "ips-client", "ping",
-                "-I", "10.10.0.2", "-c", str(loaded.traffic.count),
-                "-W", "2", "10.20.0.2",
+                "ip", "netns", "exec", "ips-client", "ping", "-I", "10.10.0.2",
+                "-c", str(loaded.traffic.count), "-W", "2", "10.20.0.2",
             ],
             15,
             log,
         )
         context["ping"] = result.stdout
 
-    def pfs_rekey() -> None:
-        rekey = pair.rekey()
-        context["rekey"] = rekey
-        context["pfs"] = evaluate_pfs(
-            rekey.before_sas,
-            rekey.after_sas,
-            rekey.log_segment,
-            attempted=rekey.attempted,
-            completed=rekey.completed,
-        )
-
-    def capture_stop() -> None:
-        _stop_captures(captures)
-        context["capture_ended_at"] = time()
-        finalized = {
-            "encrypted": run_dir / "encrypted.pcap",
-            "gateway-a": run_dir / "cleartext-audit-gateway-a.pcap",
-            "gateway-b": run_dir / "cleartext-audit-gateway-b.pcap",
-        }
-        for name, destination in finalized.items():
-            shutil.move(str(temporary_pcaps[name]), destination)
-        capture_runtime.rmdir()
-        context["pcaps"] = finalized
-
-    def pcap_validation() -> None:
-        finalized = context["pcaps"]  # type: ignore[assignment]
-        capture_evidence = validate_pcap(
-            finalized["encrypted"],  # type: ignore[index]
-            peers=("192.0.2.1", "192.0.2.2"),
-            started_at=context["capture_started_at"],  # type: ignore[arg-type]
-            ended_at=context["capture_ended_at"],  # type: ignore[arg-type]
-        )
-        cleartext_packets = validate_wire_cleartext(
-            finalized["gateway-a"],  # type: ignore[index]
-            finalized["gateway-b"],  # type: ignore[index]
-            started_at=context["capture_started_at"],  # type: ignore[arg-type]
-            ended_at=context["capture_ended_at"],  # type: ignore[arg-type]
-        )
-        context["capture"] = replace(
-            capture_evidence,
-            cleartext_packets=cleartext_packets,
-        )
-
     def verdict() -> None:
         verification = evaluate_baseline(
-            context["sas"],  # type: ignore[arg-type]
-            context["xfrm"],  # type: ignore[arg-type]
+            session.sas,
+            session.xfrm,
             context["ping"],  # type: ignore[arg-type]
-            context["capture"],  # type: ignore[arg-type]
+            session.capture_evidence,  # type: ignore[arg-type]
             run_id=run_id,
-            pfs=context["pfs"],  # type: ignore[arg-type]
+            pfs=session.pfs,
         )
         context["verification"] = verification
         if verification.status != "PASS":
             failed = [check.name for check in verification.checks if not check.passed]
             raise RuntimeError(f"evidence verdict failed: {', '.join(failed)}")
-        loaded = context["scenario"]
-        assert isinstance(loaded, Scenario)
-        sa = parse_sa(context["sas"]["gateway-a"])  # type: ignore[index]
+        loaded = session.scenario
+        assert loaded is not None
+        sa = parse_sa(session.sas["gateway-a"])
         context["ground_truth"] = GroundTruth(
             run_id=run_id,
             scenario_id=loaded.id,
             status="PASS",
             configured=ConfiguredPolicy(
-                ike_version=loaded.ipsec.ike_version,
-                mode=loaded.ipsec.mode,
-                ike_proposal=loaded.ipsec.ike_proposal,
-                esp_proposal=loaded.ipsec.esp_proposal,
-                pfs=loaded.ipsec.pfs,
-                ip_version=loaded.ipsec.ip_version,
-                local_subnet=loaded.ipsec.local_subnet,
-                remote_subnet=loaded.ipsec.remote_subnet,
-                transit_subnet=loaded.ipsec.transit_subnet,
+                loaded.ipsec.ike_version,
+                loaded.ipsec.mode,
+                loaded.ipsec.ike_proposal,
+                loaded.ipsec.esp_proposal,
+                loaded.ipsec.pfs,
+                loaded.ipsec.ip_version,
+                loaded.ipsec.local_subnet,
+                loaded.ipsec.remote_subnet,
+                loaded.ipsec.transit_subnet,
             ),
             observed=ObservedState(
-                ike_version=2,
-                ike_proposal=sa.ike_proposal,
-                esp_proposal=f"{sa.esp_proposal}/NO_EXT_SEQ",
-                pfs=context["pfs"],  # type: ignore[arg-type]
+                2,
+                sa.ike_proposal,
+                f"{sa.esp_proposal}/NO_EXT_SEQ",
+                session.pfs,
             ),
             traffic=parse_ping(context["ping"]),  # type: ignore[arg-type]
-            capture=context["capture"],  # type: ignore[arg-type]
+            capture=session.capture_evidence,  # type: ignore[arg-type]
         )
 
     def artifacts() -> None:
         write_success_artifacts(
             run_dir,
-            scenario_yaml=context["scenario_yaml"],  # type: ignore[arg-type]
+            scenario_yaml=session.scenario_yaml,
             run_log=log.getvalue(),
-            sas=context["sas"],  # type: ignore[arg-type]
-            xfrm=context["xfrm"],  # type: ignore[arg-type]
+            sas=session.sas,
+            xfrm=session.xfrm,
             verification=context["verification"],  # type: ignore[arg-type]
             ground_truth=context["ground_truth"],  # type: ignore[arg-type]
         )
-        _write_rekey_artifacts(run_dir, context.get("rekey"))
-        _copy_strongswan_logs(run_dir, pair)
-
-    def cleanup() -> None:
-        steps: list[tuple[str, Callable[[], None]]] = [
-            ("capture_stop", lambda: _stop_captures(captures)),
-            ("log_copy", lambda: _copy_strongswan_logs(run_dir, pair)),
-            ("daemon_stop", pair.stop),
-        ]
-        if not keep_lab:
-            steps.append(("topology_reset", topology.reset))
-        run_cleanup_steps(tuple(steps))
+        session.preserve_diagnostics()
 
     actions = {
-        "preflight": preflight,
-        "reset": reset,
+        "preflight": session.preflight,
+        "reset": session.reset,
         "scenario_load": scenario_load,
-        "topology_setup_readback": topology_setup_readback,
-        "daemon_start": daemon_start,
-        "capture_start": capture_start,
-        "configuration_load": configuration_load,
-        "initiate": initiate,
-        "sa_wait": sa_wait,
-        "xfrm_collection": xfrm_collection,
+        "topology_setup_readback": session.setup_topology,
+        "daemon_start": session.start_daemons,
+        "capture_start": session.start_captures,
+        "configuration_load": lambda: context.update(load=session.load_configuration()),
+        "initiate": lambda: context.update(initiate=session.initiate()),
+        "sa_wait": lambda: context.update(sas=session.wait_for_sa()),
+        "xfrm_collection": lambda: context.update(xfrm=session.collect_xfrm()),
         "icmp": icmp,
-        "pfs_rekey": pfs_rekey,
-        "capture_stop": capture_stop,
-        "pcap_validation": pcap_validation,
+        "pfs_rekey": lambda: context.update(pfs=session.rekey()),
+        "capture_stop": session.stop_captures,
+        "pcap_validation": lambda: context.update(capture=session.validate_captures()),
         "verdict": verdict,
         "artifacts": artifacts,
-        "cleanup": cleanup,
+        "cleanup": session.cleanup,
     }
 
     try:
@@ -369,13 +196,9 @@ def run_secure_baseline(
             truth = replace(truth, status=status)
         else:
             truth = None
-        _publish_failure_artifacts(
-            run_dir, log, context, verification, truth,
-            temporary_pcaps, capture_runtime,
-        )
+        _publish_failure_artifacts(run_dir, log, session, verification, truth)
         failed_stage = next(
-            (record.name for record in records if record.status != "PASS"),
-            "unknown",
+            (record.name for record in records if record.status != "PASS"), "unknown"
         )
         print(f"run directory: {run_dir}")
         print(f"first failed stage: {failed_stage}: {error}")
@@ -384,84 +207,27 @@ def run_secure_baseline(
     existing = context["verification"]
     assert isinstance(existing, Verification)
     final_verification = replace(existing, stages=records)
-    publish_results(run_dir, final_verification, context["ground_truth"])  # type: ignore[arg-type]
+    publish_results(
+        run_dir, final_verification, context["ground_truth"]  # type: ignore[arg-type]
+    )
     write_text_atomic(run_dir / "run.log", log.getvalue())
     print(f"run directory: {run_dir}")
     print("status: PASS")
     return 0
 
 
-def _scenario_path(scenario: str | Path) -> Path:
-    if isinstance(scenario, Path):
-        return scenario
-    if scenario != "secure-baseline":
-        raise ValueError(f"unsupported scenario: {scenario}")
-    return Path("scenarios/secure-baseline.yaml")
-
-
 def _publish_failure_artifacts(
     run_dir: Path,
     log: StringIO,
-    context: dict[str, object],
+    session: SecureSession,
     verification: Verification,
     truth: GroundTruth | None,
-    temporary_pcaps: dict[str, Path],
-    capture_runtime: Path,
 ) -> None:
-    if "scenario_yaml" in context:
-        write_text_atomic(run_dir / "scenario.yaml", context["scenario_yaml"])  # type: ignore[arg-type]
+    if session.scenario_yaml:
+        write_text_atomic(run_dir / "scenario.yaml", session.scenario_yaml)
     write_text_atomic(run_dir / "run.log", log.getvalue())
-    for key, prefix in (("sas", "swanctl"), ("xfrm", "xfrm")):
-        values = context.get(key)
-        if isinstance(values, dict):
-            for gateway, value in values.items():
-                write_text_atomic(run_dir / f"{prefix}-{gateway}.txt", str(value))
-    destinations = {
-        "encrypted": run_dir / "encrypted.pcap",
-        "gateway-a": run_dir / "cleartext-audit-gateway-a.pcap",
-        "gateway-b": run_dir / "cleartext-audit-gateway-b.pcap",
-    }
-    for name, temporary in temporary_pcaps.items():
-        if temporary.is_file() and not destinations[name].exists():
-            shutil.move(str(temporary), destinations[name])
-    try:
-        capture_runtime.rmdir()
-    except OSError:
-        pass
-    for parent in (capture_runtime.parent, capture_runtime.parent.parent):
-        try:
-            parent.rmdir()
-        except OSError:
-            pass
-    _write_rekey_artifacts(run_dir, context.get("rekey"))
+    for values, prefix in ((session.sas, "swanctl"), (session.xfrm, "xfrm")):
+        for gateway, value in values.items():
+            write_text_atomic(run_dir / f"{prefix}-{gateway}.txt", value)
+    session.preserve_diagnostics()
     publish_results(run_dir, verification, truth)
-
-
-def _write_rekey_artifacts(run_dir: Path, value: object) -> None:
-    if not isinstance(value, RekeyEvidence):
-        return
-    write_text_atomic(run_dir / "pfs-rekey.log", value.log_segment)
-    for gateway in ("gateway-a", "gateway-b"):
-        write_text_atomic(
-            run_dir / f"swanctl-before-rekey-{gateway}.txt",
-            value.before_sas[gateway],
-        )
-        write_text_atomic(
-            run_dir / f"swanctl-after-rekey-{gateway}.txt",
-            value.after_sas[gateway],
-        )
-
-
-def _copy_strongswan_logs(run_dir: Path, pair: StrongSwanPair) -> None:
-    for gateway, files in pair.files.items():
-        if files.log.is_file():
-            write_text_atomic(
-                run_dir / f"strongswan-{gateway}.log",
-                files.log.read_text(encoding="utf-8", errors="replace"),
-            )
-
-
-def _stop_captures(captures: dict[str, CaptureSession]) -> None:
-    run_cleanup_steps(
-        tuple((f"{name}_capture", capture.stop) for name, capture in captures.items())
-    )
