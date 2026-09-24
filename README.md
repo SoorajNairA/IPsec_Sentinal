@@ -123,7 +123,7 @@ tcpdump -nn -r "$RUN/cleartext-audit-gateway-b.pcap" \
 
 The first two commands must show peer-matched traffic between `192.0.2.1` and `192.0.2.2`; UDP/4500 and protected ICMP in the outer-filtered PCAP must print no packets. The expected automated run has 8 UDP/500 packets (initial IKE plus CHILD rekey) and 10 ESP packets for five request/reply exchanges.
 
-The two audit PCAPs deliberately include protected ICMP. On this WSL2 endpoint-veth observation point, gateway A exposes only post-decryption replies and gateway B only post-decryption requests. The validator fingerprints source, destination, ICMP type, identifier, and sequence. The same fingerprint on both transit endpoints would prove cleartext crossed the veth and fails the run; correct encrypted traffic has no cross-endpoint match.
+The two audit PCAPs deliberately include protected ICMP. On this WSL2 endpoint-veth observation point, gateway A exposes only post-decryption replies and gateway B only post-decryption requests. Each audit must independently contain peer-matched outer IKE and ESP, and all three tcpdump logs must report zero kernel drops. The validator fingerprints source, destination, ICMP type, identifier, and sequence. The same fingerprint on both transit endpoints would prove cleartext crossed the veth and fails the run; correct encrypted traffic has no cross-endpoint match.
 
 Raw independent state is available in the two `swanctl-*.txt` and two `xfrm-*.txt` files. Search `run.log` for the protected ping summary:
 

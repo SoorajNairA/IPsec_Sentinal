@@ -114,6 +114,7 @@ class CaptureSession:
         self._process = None
         if returncode != 0:
             raise RuntimeError(f"tcpdump exited with status {returncode}")
+        validate_capture_log(self.log_path)
 
     def _close_log(self) -> None:
         if self._log is not None:
@@ -185,6 +186,18 @@ def validate_wire_cleartext(
 ) -> int:
     a_packets = _read_packets(gateway_a_path, started_at, ended_at)
     b_packets = _read_packets(gateway_b_path, started_at, ended_at)
+    for name, packets in (("gateway-a", a_packets), ("gateway-b", b_packets)):
+        peer_matched = [
+            packet
+            for packet in packets
+            if "192.0.2.1" in packet and "192.0.2.2" in packet
+        ]
+        if not any("isakmp:" in packet for packet in peer_matched) or not any(
+            "ESP(" in packet for packet in peer_matched
+        ):
+            raise CaptureValidationError(
+                f"{name} cleartext audit is missing peer-matched outer IKE/ESP observations"
+            )
     a_signatures = {_icmp_signature(packet) for packet in a_packets}
     b_signatures = {_icmp_signature(packet) for packet in b_packets}
     a_signatures.discard(None)
@@ -195,6 +208,20 @@ def validate_wire_cleartext(
             f"protected cleartext ICMP appeared on both transit endpoints: {len(correlated)} packets"
         )
     return 0
+
+
+def validate_capture_log(path: Path) -> None:
+    if not path.is_file():
+        raise CaptureValidationError(f"tcpdump log is missing: {path}")
+    text = path.read_text(encoding="utf-8", errors="replace")
+    match = re.search(r"(\d+) packets? dropped by kernel", text)
+    if match is None:
+        raise CaptureValidationError(f"tcpdump drop count is missing: {path}")
+    dropped = int(match.group(1))
+    if dropped:
+        raise CaptureValidationError(
+            f"tcpdump reported {dropped} packets dropped by kernel: {path}"
+        )
 
 
 def _read_packets(path: Path, started_at: float, ended_at: float) -> list[str]:

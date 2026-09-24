@@ -6,6 +6,7 @@ import unittest
 
 from ipsec_sentinel.capture import (
     CaptureValidationError,
+    validate_capture_log,
     validate_pcap,
     validate_wire_cleartext,
 )
@@ -73,21 +74,53 @@ class CaptureValidationTest(unittest.TestCase):
             )
 
     def test_cleartext_audit_requires_same_inner_packet_on_both_transit_endpoints(self) -> None:
-        one_sided = validate_wire_cleartext(
-            FIXTURES / "cleartext-icmp.pcap",
-            FIXTURES / "ike-esp.pcap",
-            started_at=FULL_WINDOW[0],
-            ended_at=FULL_WINDOW[1],
-        )
-        self.assertEqual(one_sided, 0)
-
-        with self.assertRaisesRegex(CaptureValidationError, "both transit endpoints"):
-            validate_wire_cleartext(
-                FIXTURES / "cleartext-icmp.pcap",
-                FIXTURES / "cleartext-icmp.pcap",
-                started_at=FULL_WINDOW[0],
-                ended_at=FULL_WINDOW[1],
+        outer = [
+            "IP 192.0.2.1.500 > 192.0.2.2.500: isakmp: parent_sa ikev2_init[I]",
+            "IP 192.0.2.1 > 192.0.2.2: ESP(spi=0x1,seq=0x1), length 120",
+        ]
+        request = "IP 10.10.0.2 > 10.20.0.2: ICMP echo request, id 1, seq 1, length 64"
+        reply = "IP 10.20.0.2 > 10.10.0.2: ICMP echo reply, id 1, seq 1, length 64"
+        with patch(
+            "ipsec_sentinel.capture._read_packets",
+            side_effect=(outer + [reply], outer + [request]),
+        ):
+            self.assertEqual(
+                validate_wire_cleartext(
+                    Path("a.pcap"), Path("b.pcap"),
+                    started_at=FULL_WINDOW[0], ended_at=FULL_WINDOW[1],
+                ),
+                0,
             )
+
+        with patch(
+            "ipsec_sentinel.capture._read_packets",
+            side_effect=(outer + [request], outer + [request]),
+        ):
+            with self.assertRaisesRegex(CaptureValidationError, "both transit endpoints"):
+                validate_wire_cleartext(
+                    Path("a.pcap"), Path("b.pcap"),
+                    started_at=FULL_WINDOW[0], ended_at=FULL_WINDOW[1],
+                )
+
+    def test_cleartext_audit_fails_closed_without_outer_observations(self) -> None:
+        with patch(
+            "ipsec_sentinel.capture._read_packets",
+            side_effect=([], []),
+        ):
+            with self.assertRaisesRegex(CaptureValidationError, "outer IKE/ESP"):
+                validate_wire_cleartext(
+                    Path("a.pcap"), Path("b.pcap"),
+                    started_at=FULL_WINDOW[0], ended_at=FULL_WINDOW[1],
+                )
+
+    def test_capture_log_rejects_kernel_drops(self) -> None:
+        with TemporaryDirectory() as directory:
+            log = Path(directory) / "tcpdump.log"
+            log.write_text(
+                "20 packets captured\n20 packets received by filter\n1 packet dropped by kernel\n"
+            )
+            with self.assertRaisesRegex(CaptureValidationError, "dropped"):
+                validate_capture_log(log)
 
     def test_pcap_reader_timeout_is_a_validation_failure(self) -> None:
         with patch(

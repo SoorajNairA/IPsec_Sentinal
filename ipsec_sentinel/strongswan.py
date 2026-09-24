@@ -182,17 +182,34 @@ class StrongSwanPair:
         return RekeyEvidence(True, completed, before, after, segment)
 
     def stop(self) -> None:
+        errors: list[str] = []
         for name, process in tuple(self._processes.items()):
-            if process.poll() is None:
-                process.send_signal(signal.SIGTERM)
+            try:
+                if process.poll() is None:
+                    process.send_signal(signal.SIGTERM)
+                    try:
+                        process.wait(timeout=self.timeout)
+                    except subprocess.TimeoutExpired:
+                        process.kill()
+                        process.wait(timeout=self.timeout)
+            except ProcessLookupError:
+                pass
+            except BaseException as error:
+                errors.append(f"{name}: {error}")
                 try:
-                    process.wait(timeout=self.timeout)
-                except subprocess.TimeoutExpired:
                     process.kill()
                     process.wait(timeout=self.timeout)
-            self._processes.pop(name, None)
-        for output in self._stdout_files.values():
-            output.close()
+                except ProcessLookupError:
+                    pass
+                except BaseException as forced_error:
+                    errors.append(f"{name} forced stop: {forced_error}")
+            finally:
+                self._processes.pop(name, None)
+        for name, output in tuple(self._stdout_files.items()):
+            try:
+                output.close()
+            except BaseException as error:
+                errors.append(f"{name} output close: {error}")
         self._stdout_files.clear()
         runtime_dirs: set[Path] = set()
         for files in self.files.values():
@@ -210,6 +227,8 @@ class StrongSwanPair:
                 parent.rmdir()
             except OSError:
                 pass
+        if errors:
+            raise RuntimeError("strongSwan cleanup errors: " + "; ".join(errors))
 
     def _swanctl(self, name: str, operation: str, *arguments: str):
         if name not in self.files:

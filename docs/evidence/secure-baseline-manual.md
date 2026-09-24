@@ -229,7 +229,7 @@ Automation was permitted to begin at this point. This manual milestone continues
 
 ## Automated Baseline and PFS Follow-up
 
-The completed runner preserves the manual gate and then performs a separate explicit CHILD_SA rekey. Representative post-review repeated runs are `runs/run_20260924T145925Z` and `runs/run_20260924T145941Z`.
+The completed runner preserves the manual gate and then performs a separate explicit CHILD_SA rekey. Representative final repeated runs are `runs/run_20260924T150855Z` and `runs/run_20260924T150909Z`.
 
 The initial and rekey evidence remained distinct:
 
@@ -237,8 +237,8 @@ The initial and rekey evidence remained distinct:
 configured.pfs = true
 initial CHILD_SA PFS status = NOT_TESTED
 explicit rekey attempted = true
-gateway-a CHILD SPIs: c9404239/cbc02da9 -> cbc806b0/cd42cdd8
-gateway-b CHILD SPIs: cbc02da9/c9404239 -> cd42cdd8/cbc806b0
+gateway-a CHILD SPIs: ce47b343/c193b064 -> c662d0b7/cf387e36
+gateway-b CHILD SPIs: c193b064/ce47b343 -> cf387e36/c662d0b7
 rekey completed: true
 reciprocal SPIs: true
 both inbound and outbound SPIs changed: true
@@ -263,10 +263,10 @@ overall verification: PASS
 Independent saved-PCAP validation produced identical protocol counts in both final runs:
 
 ```text
-run_20260924T145925Z sha256 a3deccc61c598bccd29b1ea43f8c8ed9b33820c64a414a39fbb96d5170849580
-run_20260924T145941Z sha256 5f99e69c3be70399723823cdde14aa3eb4872034dc52df6f664168fff7973359
+run_20260924T150855Z sha256 3b68c92d9feed27fb6f8f09b8cc0394619da96e0ea89a9a90e71a171f6409a65
+run_20260924T150909Z sha256 f5b2d082df8aa7f2c339160f71247e0b89f951b26e5d5ce87790644c16a1be33
 ```
 
 The automated capture uses tcpdump immediate mode so packets received just before bounded SIGINT shutdown are published to the PCAP. The run directory retains the initial SA views, before/after-rekey SA views, XFRM snapshots, the rekey-only strongSwan log segment, full daemon logs, the filtered outer PCAP, two broad endpoint-audit PCAPs, scenario, run log, verification, and ground truth.
 
-The broad-capture WSL2 endpoint-veth limitation described above still applies. The validator accounts for it by fingerprinting protected ICMP on both gateway transit endpoints: a true on-wire cleartext packet would occur in both captures, whereas the post-decryption artifact appears only at its receiving endpoint. Any matching source/destination/type/id/sequence fingerprint fails the run. The CHILD SPIs must also match reciprocal, direction-correlated XFRM states and policies.
+The broad-capture WSL2 endpoint-veth limitation described above still applies. The validator accounts for it by fingerprinting protected ICMP on both gateway transit endpoints: a true on-wire cleartext packet would occur in both captures, whereas the post-decryption artifact appears only at its receiving endpoint. Any matching source/destination/type/id/sequence fingerprint fails the run. Both audits must also contain outer IKE and ESP and report zero kernel drops, so an empty or degraded audit cannot prove absence. The CHILD SPIs must match reciprocal, direction-correlated XFRM states and policies.

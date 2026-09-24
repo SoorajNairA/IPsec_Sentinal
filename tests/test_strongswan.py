@@ -3,11 +3,28 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import Mock
 import unittest
+import signal
 
 from ipsec_sentinel.strongswan import GatewayFiles, StrongSwanPair
 
 
 class StrongSwanRenderingTest(unittest.TestCase):
+    def test_stop_attempts_both_daemons_when_the_first_wait_fails(self) -> None:
+        pair = StrongSwanPair(StringIO(), timeout=0.1)
+        first = Mock()
+        first.poll.return_value = None
+        first.wait.side_effect = RuntimeError("wait failed")
+        second = Mock()
+        second.poll.return_value = None
+        second.wait.return_value = 0
+        pair._processes = {"gateway-a": first, "gateway-b": second}
+
+        with self.assertRaisesRegex(RuntimeError, "gateway-a"):
+            pair.stop()
+
+        first.send_signal.assert_called_once_with(signal.SIGTERM)
+        second.send_signal.assert_called_once_with(signal.SIGTERM)
+
     def test_rekey_snapshots_spis_and_returns_only_new_log_segment(self) -> None:
         before = {
             "gateway-a": "state=INSTALLED spi-in=11111111 spi-out=22222222",
