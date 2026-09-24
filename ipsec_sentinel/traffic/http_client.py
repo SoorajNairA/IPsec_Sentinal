@@ -48,7 +48,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output", type=Path, required=True)
     args = parser.parse_args(argv)
     plan = json.loads(args.plan.read_text(encoding="utf-8"))
-    write_json_atomic(args.output, {"records": execute_plan(plan)})
+    started = time.monotonic_ns()
+    records = execute_plan(plan)
+    duration_seconds = (time.monotonic_ns() - started) / 1_000_000_000
+    write_json_atomic(
+        args.output, {"records": records, "duration_seconds": duration_seconds}
+    )
     return 0
 
 
