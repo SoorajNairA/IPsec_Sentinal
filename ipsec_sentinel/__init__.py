@@ -1,1 +1,1 @@
-"""IPsec Sentinel Phase 1 testbed."""
+"""IPsec Sentinel testbed, evidence verifier, and dataset factory."""

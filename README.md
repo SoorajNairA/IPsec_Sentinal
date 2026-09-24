@@ -1,6 +1,6 @@
 # IPsec Sentinel
 
-IPsec Sentinel Phase 1 is a Linux-first IPsec testbed and verifier. It creates a genuine IKEv2 site-to-site tunnel with strongSwan, sends ICMP through Linux XFRM, captures UDP/500 and native protocol-50 ESP, and writes configured-versus-observed evidence. This phase deliberately contains no AI/ML, UI, dataset generation, NAT/NAT-T scenario, or generalized algorithm matrix.
+IPsec Sentinel is a Linux-first IPsec testbed, evidence verifier, and reproducible encrypted-traffic dataset factory. It creates a genuine IKEv2 site-to-site tunnel with strongSwan, runs a known local workload through Linux XFRM, captures UDP/500 and native protocol-50 ESP, and writes configured-versus-observed evidence. Phase 2 adds dataset generation without changing the Phase 1 `run_secure_baseline()` behavior. It deliberately performs no feature extraction, dataset cleaning for ML, model training, UI work, NAT/NAT-T scenario, or generalized algorithm matrix.
 
 ## Topology
 
@@ -131,6 +131,73 @@ Raw independent state is available in the two `swanctl-*.txt` and two `xfrm-*.tx
 grep -F '5 packets transmitted, 5 received' "$RUN/run.log"
 ```
 
+## Dataset factory
+
+Phase 2 runs the same tightly coupled secure-session lifecycle once per dataset attempt. Every attempt gets a new topology, strongSwan pair, IKE SA, CHILD SA, capture set, explicit CHILD_SA rekey, evidence bundle, cleanup result, and immutable manifest row. The protected networks remain `10.10.0.0/24` and `10.20.0.0/24`; capture occurs on the `192.0.2.0/30` transit veth where UDP/500 IKE and native protocol-50 ESP are directly observable. NAT and NAT-T remain excluded.
+
+The supported traffic classes are:
+
+- `icmp`: seeded count, interval, and payload size.
+- `web`: seeded local page/resource order, sizes, and think times, with matching client records and server receipts.
+- `video`: seeded local segment profile, sequence, sizes, and pacing, with matching client records and server receipts.
+
+The same generator version, scenario, and seed resolves the same workload parameters where practical. Different attempt seeds vary meaningful workload parameters. Every resolved value and observed result is written to `traffic.json`; no Internet service or third-party content is used.
+
+Run these commands from the repository root inside WSL2:
+
+```bash
+python3 -m ipsec_sentinel.dataset list-traffic
+sudo python3 -m ipsec_sentinel.dataset run \
+  --traffic video --scenario secure-baseline
+sudo python3 -m ipsec_sentinel.dataset generate configs/smoke-v1.yaml
+sudo python3 -m ipsec_sentinel.dataset generate configs/smoke-v1.yaml --resume
+python3 -m ipsec_sentinel.dataset validate dataset/cipherlens-smoke-v1
+```
+
+`full-evidence.pcap` preserves the complete secure session: IKE establishment, workload ESP, and rekey/PFS evidence. `encrypted.pcap` is the future-ML input. It is deterministically derived from the full capture after the run by retaining only Ethernet/IPv4 protocol-50 packets exchanged between `192.0.2.1` and `192.0.2.2` whose PCAP timestamps fall inclusively between the nanosecond timestamps taken immediately before and after the workload process. The derived file is then parsed again and rejected if it contains a non-ESP packet, a wrong peer, an out-of-window timestamp, or zero packets. IKE establishment and rekey occur outside this workload window, so they cannot become classifier shortcuts.
+
+Each successful attempt records the requested policy separately from live SA/XFRM/capture observations. PFS is configured policy until an explicit CHILD_SA rekey changes reciprocal SPIs and a fresh ECP-384 DH selection appears in the new daemon log segment. Dataset validation requires verified traffic, IPsec, capture separation, and cleanup; `PASS` alone cannot make a run training-ready unless every requirement passes.
+
+The SQLite manifest uses `PENDING`, `RUNNING`, `PASS`, `FAILED`, and `INCOMPLETE` lifecycle states. Cleanup has its own `NOT_STARTED`, `PASS`, or `FAILED` status so it never hides the primary failure. Retries create new attempt IDs, seeds, directories, tunnels, and manifest rows; failed diagnostics are retained. `--resume` verifies the matrix fingerprint, converts stale `RUNNING` attempts to `INCOMPLETE`, retries eligible slots within the configured limit, and never regenerates a successful slot. A changed matrix is rejected rather than silently mixed into an existing dataset.
+
+A successful attempt has this shape:
+
+```text
+dataset/<dataset-name>/
+  manifest.sqlite3
+  matrix.yaml
+  dataset_summary.json
+  runs/run_000001/
+    full-evidence.pcap
+    encrypted.pcap
+    cleartext-audit-gateway-{a,b}.pcap
+    ground_truth.json
+    verification.json
+    traffic.json
+    environment.json
+    scenario.yaml
+    run.log
+    swanctl-{gateway-a,gateway-b}.txt
+    swanctl-{before-rekey,after-rekey}-{gateway-a,gateway-b}.txt
+    xfrm-{gateway-a,gateway-b}.txt
+    pfs-rekey.log
+    strongswan-{gateway-a,gateway-b}.log
+    tcpdump*.log
+```
+
+The offline validator reconciles the manifest, terminal JSON, ground-truth label, traffic parameters, PFS status, capture counts, capture size, workload window, and required files. It reparses every training-ready `encrypted.pcap` using the strict ESP-only contract. Failed and incomplete attempts remain inspectable but are excluded from the successful training-ready set.
+
+For resumable unattended collection, create and review a larger matrix first, then replace only the matrix path in this pattern:
+
+```bash
+sudo nohup python3 -m ipsec_sentinel.dataset generate configs/smoke-v1.yaml --resume \
+  > dataset-generation.log 2>&1 &
+```
+
+A host-native supervisor such as systemd is preferred for long collections. A force-kill can leave a `RUNNING` row; the next `--resume` converts it to `INCOMPLETE` before deciding whether to retry. Execution is intentionally serial in Phase 2.
+
+New generators implement the five-method traffic contract: `prepare(context)`, `run(context)`, `validate(context, result)`, `cleanup(context)`, and `metadata()`. They must be locally controlled, seed all planned variability, record every selected parameter, validate the intended class from both available endpoints, and make cleanup idempotent before registration in the traffic registry.
+
 ## Tests
 
 Unit tests do not require privileges. The integration test creates the real tunnel and must run as root:
@@ -139,6 +206,8 @@ Unit tests do not require privileges. The integration test creates the real tunn
 python3 -m unittest discover -s tests -v
 sudo env IPSEC_SENTINEL_INTEGRATION=1 \
   python3 -m unittest tests.test_secure_baseline_integration -v
+sudo env IPSEC_SENTINEL_DATASET_INTEGRATION=1 \
+  python3 -m unittest tests.test_dataset_integration -v
 ```
 
 ## Cleanup and failure safety
@@ -158,10 +227,10 @@ The runner does not use wildcard process killing. A host crash or force-kill tha
 
 ## Limitations and next phase
 
-Only `secure-baseline` is supported: IKEv2, IPv4 tunnel mode, PSK authentication, AES-256-GCM, ECP-384, PFS rekey, and ICMP. The deterministic lab PSK is test-only. There is no NAT-T, IPv6, transport mode, IKEv1, impairment injection, application traffic, security scoring, UI, or cloud support.
+Only `secure-baseline` is supported: IKEv2, IPv4 tunnel mode, PSK authentication, AES-256-GCM, ECP-384, and PFS rekey. Dataset workloads are ICMP, local HTTP Web, and local segmented Video over the clean network profile. The deterministic lab PSK is test-only. There is no NAT-T, IPv6, transport mode, IKEv1, impairment injection, parallel execution, security scoring, UI, or cloud support.
 
 The compact ground-truth schema stores configured policy, negotiated proposals, PFS evidence, traffic outcome, and capture counts. Detailed identities, selectors, SA states/SPIs, and XFRM directions remain in `verification.json` and the retained raw evidence files instead of being duplicated into `ground_truth.json`.
 
 On this WSL2/veth kernel, a broad AF_PACKET capture on a gateway endpoint exposes a post-decryption inbound inner packet artifact. IPsec Sentinel therefore retains a filtered outer-wire PCAP plus broad audit PCAPs from both transit endpoints. Cleartext exclusion is based on cross-endpoint packet correlation, while bidirectional ESP and SPI-correlated XFRM/CHILD state provide independent corroboration. This is still a virtual-interface observation, not a physical-tap proof.
 
-Phase 2 -- automated encrypted-traffic dataset generation -- is intentionally deferred. The recommended next step is to design it only after this Phase 1 baseline remains stable on the target collection hosts and the user explicitly authorizes Phase 2.
+Phase 2 ends at validated evidence and dataset creation. It does not extract features, clean data for ML, construct train/test splits, train classifiers, evaluate models, or export a model. Those are Phase 3 concerns and require separate review and authorization.

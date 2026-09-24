@@ -1,4 +1,5 @@
 .worktrees/
 runs/
+dataset/
 __pycache__/
 *.pyc
