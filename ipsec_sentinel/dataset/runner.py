@@ -20,7 +20,9 @@ from ipsec_sentinel.dataset.artifacts import (
     validate_terminal_payloads,
     write_raw_attempt_artifacts,
 )
-from ipsec_sentinel.dataset.manifest import AttemptPlan
+from ipsec_sentinel.dataset.config import DatasetConfig
+from ipsec_sentinel.dataset.manifest import AttemptPlan, Manifest
+from ipsec_sentinel.dataset.matrix import matrix_fingerprint
 from ipsec_sentinel.dataset.models import (
     DATASET_SCHEMA_VERSION,
     MANIFEST_SCHEMA_VERSION,
@@ -33,6 +35,7 @@ from ipsec_sentinel.dataset.models import (
     WorkloadWindow,
 )
 from ipsec_sentinel.dataset.network import CleanNetworkProfile
+from ipsec_sentinel.dataset.summary import DatasetSummary, build_summary, write_summary
 from ipsec_sentinel.evidence import evaluate_ipsec, evaluate_tunnel
 from ipsec_sentinel.models import StageRecord, Verification
 from ipsec_sentinel.pcap import PcapSummary, derive_workload_esp, inspect_ml_pcap
@@ -44,7 +47,9 @@ from ipsec_sentinel.traffic.base import (
     TrafficRunResult,
     TrafficValidation,
     create_generator,
+    generator_versions,
 )
+from ipsec_sentinel.traffic import register_builtin_generators
 
 
 DATASET_STAGES = (
@@ -575,3 +580,95 @@ def run_dataset_attempt(
         0 if ml_summary is None else ml_summary.capture_bytes,
         0.0 if ml_summary is None else ml_summary.duration_seconds,
     )
+
+
+AttemptRunner = Callable[[AttemptPlan, Path, str], AttemptOutcome]
+RETRIABLE_FAILURES = frozenset(
+    {
+        "topology_failed",
+        "tunnel_establishment_failed",
+        "ipsec_evidence_failed",
+        "traffic_prepare_failed",
+        "traffic_generator_failed",
+        "traffic_validation_failed",
+        "capture_failed",
+        "zero_or_insufficient_esp",
+        "pcap_derivation_failed",
+        "artifact_publication_failed",
+        "cleanup_failed",
+        "interrupted",
+        "metadata_collection_failed",
+        "unexpected_error",
+    }
+)
+
+
+def is_retriable(failure_class: str | None) -> bool:
+    return failure_class in RETRIABLE_FAILURES
+
+
+def generate_dataset(
+    config_path: Path,
+    dataset_parent: Path = Path("dataset"),
+    *,
+    resume: bool = False,
+    attempt_runner: AttemptRunner = run_dataset_attempt,
+) -> DatasetSummary:
+    register_builtin_generators()
+    config = DatasetConfig.load(config_path)
+    versions = generator_versions(config.traffic_classes)
+    fingerprint = matrix_fingerprint(config, versions)
+    dataset_root = dataset_parent / config.name
+    manifest_path = dataset_root / "manifest.sqlite3"
+    if manifest_path.is_file():
+        manifest = Manifest(manifest_path)
+        if not resume:
+            manifest.close()
+            raise FileExistsError(f"dataset already initialized: {dataset_root}")
+        manifest.assert_compatible(fingerprint)
+        manifest.recover_running(utc_now())
+    else:
+        if dataset_root.exists() and any(dataset_root.iterdir()):
+            raise FileExistsError(
+                f"uninitialized nonempty dataset directory: {dataset_root}"
+            )
+        dataset_root.mkdir(parents=True, exist_ok=True)
+        manifest = Manifest(manifest_path)
+        write_text_atomic(
+            dataset_root / "matrix.yaml", config_path.read_text(encoding="utf-8")
+        )
+        manifest.initialize(config, fingerprint, str(config_path), versions)
+
+    try:
+        for slot in manifest.slots_in_order():
+            while True:
+                latest = manifest.latest_attempt(slot.slot_id)
+                if (
+                    latest is not None
+                    and latest.state in (RunState.FAILED, RunState.INCOMPLETE)
+                    and not is_retriable(latest.failure_class)
+                ):
+                    break
+                plan = manifest.next_attempt(slot.slot_id, config.retry_failed)
+                if plan is None:
+                    break
+                manifest.mark_running(plan.attempt_id, utc_now())
+                outcome = attempt_runner(plan, dataset_root, fingerprint)
+                manifest.finish_attempt_from_outcome(outcome, utc_now())
+                write_summary(
+                    dataset_root / "dataset_summary.json", build_summary(manifest)
+                )
+                if (
+                    outcome.state is RunState.INCOMPLETE
+                    and outcome.failure_class == "interrupted"
+                ):
+                    raise KeyboardInterrupt()
+                if outcome.state is RunState.PASS or not is_retriable(
+                    outcome.failure_class
+                ):
+                    break
+        summary = build_summary(manifest)
+        write_summary(dataset_root / "dataset_summary.json", summary)
+        return summary
+    finally:
+        manifest.close()

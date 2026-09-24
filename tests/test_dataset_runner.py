@@ -10,9 +10,11 @@ from ipsec_sentinel.dataset.artifacts import (
 )
 from ipsec_sentinel.dataset.models import CleanupState, RunState
 from ipsec_sentinel.dataset.manifest import AttemptPlan
+from ipsec_sentinel.dataset.manifest import Manifest, ManifestMismatch
 from ipsec_sentinel.dataset.runner import (
     classify_failure,
     finalize_attempt_state,
+    generate_dataset,
     run_dataset_attempt,
 )
 from ipsec_sentinel.models import CaptureEvidence, PfsObservation
@@ -162,7 +164,50 @@ def plan_fixture() -> AttemptPlan:
     )
 
 
+def outcome_for(
+    plan: AttemptPlan,
+    state: RunState,
+    failure_class: str | None = None,
+) -> object:
+    from ipsec_sentinel.dataset.models import AttemptOutcome
+
+    passed = state is RunState.PASS
+    return AttemptOutcome(
+        plan.attempt_id, plan.slot_id, plan.attempt_number, state,
+        CleanupState.PASS, passed, failure_class,
+        None if passed else "injected", plan.artifact_path,
+        "2026-09-25T00:00:00Z", "2026-09-25T00:00:01Z",
+        "2026-09-25T00:00:00Z", "2026-09-25T00:00:01Z",
+        ({"name": "cleanup", "status": "PASS", "error": None},), None,
+        passed, passed, passed, 12 if passed else 0, 672 if passed else 0,
+        1.0 if passed else 0.0,
+    )
+
+
 class DatasetRunnerTest(unittest.TestCase):
+    def matrix_path(
+        self, directory: Path, *, seed: int = 1, runs: int = 2, retry_failed: int = 1
+    ) -> Path:
+        path = directory / f"matrix-{seed}-{runs}-{retry_failed}.yaml"
+        path.write_text(
+            f"""dataset:
+  name: test-dataset
+  schema_version: ipsec-sentinel.dataset-ground-truth/v1
+  seed: {seed}
+traffic:
+  classes: [icmp]
+ipsec:
+  scenarios: [secure-baseline]
+network_profiles: [clean]
+runs_per_combination: {runs}
+execution:
+  workers: 1
+  retry_failed: {retry_failed}
+""",
+            encoding="utf-8",
+        )
+        return path
+
     def test_failure_classification_is_stable(self) -> None:
         self.assertEqual(
             classify_failure("sa_wait", TimeoutError("no SA")),
@@ -277,6 +322,106 @@ class DatasetRunnerTest(unittest.TestCase):
             run_dir = Path(directory) / "runs/run_000001"
             self.assertTrue((run_dir / "traffic.json").is_file())
             self.assertTrue((run_dir / "pfs-rekey.log").is_file())
+
+    def test_resume_skips_pass_and_retries_failed_once(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            calls: list[str] = []
+
+            def runner(plan, dataset_root, fingerprint):
+                del dataset_root, fingerprint
+                calls.append(plan.attempt_id)
+                if plan.slot_id == "run_000001" and plan.attempt_number == 1:
+                    return outcome_for(plan, RunState.FAILED, "traffic_generator_failed")
+                return outcome_for(plan, RunState.PASS)
+
+            summary = generate_dataset(
+                self.matrix_path(root), root / "datasets", attempt_runner=runner
+            )
+            self.assertEqual(
+                calls, ["run_000001", "run_000001-attempt02", "run_000002"]
+            )
+            self.assertEqual(summary.successful_runs, 2)
+            calls.clear()
+            resumed = generate_dataset(
+                self.matrix_path(root), root / "datasets", resume=True,
+                attempt_runner=runner,
+            )
+            self.assertEqual(calls, [])
+            self.assertEqual(resumed.successful_runs, 2)
+
+    def test_resume_recovers_running_as_incomplete_then_retries(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = self.matrix_path(root, runs=1)
+
+            def crash(plan, dataset_root, fingerprint):
+                del plan, dataset_root, fingerprint
+                raise RuntimeError("simulated process crash")
+
+            with self.assertRaisesRegex(RuntimeError, "simulated"):
+                generate_dataset(config, root / "datasets", attempt_runner=crash)
+            calls: list[str] = []
+
+            def recover(plan, dataset_root, fingerprint):
+                del dataset_root, fingerprint
+                calls.append(plan.attempt_id)
+                return outcome_for(plan, RunState.PASS)
+
+            summary = generate_dataset(
+                config, root / "datasets", resume=True, attempt_runner=recover
+            )
+            self.assertEqual(calls, ["run_000001-attempt02"])
+            self.assertEqual(summary.attempts_by_state["INCOMPLETE"], 1)
+            self.assertEqual(summary.successful_runs, 1)
+
+    def test_exhausted_retry_and_nonretriable_failure_are_not_hidden(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            calls: list[str] = []
+
+            def fail(plan, dataset_root, fingerprint):
+                del dataset_root, fingerprint
+                calls.append(plan.attempt_id)
+                return outcome_for(plan, RunState.FAILED, "traffic_generator_failed")
+
+            summary = generate_dataset(
+                self.matrix_path(root, runs=1), root / "datasets", attempt_runner=fail
+            )
+            self.assertEqual(calls, ["run_000001", "run_000001-attempt02"])
+            self.assertEqual(summary.failed_runs, 1)
+            self.assertEqual(summary.failures_by_class, {"traffic_generator_failed": 2})
+
+            root2 = root / "nonretriable"
+            root2.mkdir()
+            calls.clear()
+
+            def config_fail(plan, dataset_root, fingerprint):
+                del dataset_root, fingerprint
+                calls.append(plan.attempt_id)
+                return outcome_for(plan, RunState.FAILED, "configuration_failed")
+
+            nonretry = generate_dataset(
+                self.matrix_path(root2, runs=1), root2 / "datasets",
+                attempt_runner=config_fail,
+            )
+            self.assertEqual(calls, ["run_000001"])
+            self.assertEqual(nonretry.failed_runs, 1)
+
+    def test_resume_rejects_changed_fingerprint_and_no_resume_refuses_existing(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = self.matrix_path(root, seed=1, runs=1)
+            passing = lambda plan, dataset_root, fingerprint: outcome_for(plan, RunState.PASS)
+            generate_dataset(config, root / "datasets", attempt_runner=passing)
+            with self.assertRaises(FileExistsError):
+                generate_dataset(config, root / "datasets", attempt_runner=passing)
+            with self.assertRaisesRegex(ManifestMismatch, "fingerprint"):
+                generate_dataset(
+                    self.matrix_path(root, seed=2, runs=1),
+                    root / "datasets", resume=True,
+                    attempt_runner=lambda *args: self.fail("must not run"),
+                )
 
 
 if __name__ == "__main__":
