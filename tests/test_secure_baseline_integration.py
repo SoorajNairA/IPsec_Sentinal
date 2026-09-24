@@ -28,6 +28,8 @@ class SecureBaselineIntegrationTest(unittest.TestCase):
             )
             self.assertTrue((run_dir / "strongswan-gateway-a.log").is_file())
             self.assertTrue((run_dir / "strongswan-gateway-b.log").is_file())
+            self.assertTrue((run_dir / "cleartext-audit-gateway-a.pcap").is_file())
+            self.assertTrue((run_dir / "cleartext-audit-gateway-b.pcap").is_file())
             self.assertEqual(
                 json.loads((run_dir / "verification.json").read_text())["status"],
                 "PASS",

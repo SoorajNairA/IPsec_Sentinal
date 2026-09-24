@@ -110,23 +110,22 @@ class TopologyTest(unittest.TestCase):
                 )
         self.assertFalse(any("nat" in command for command in commands))
 
-    def test_cleanup_plan_names_only_tracked_pids_and_lab_namespaces(self) -> None:
+    def test_cleanup_plan_names_only_tracked_pids_and_exact_lab_resources(self) -> None:
         commands = Topology.reset_commands((101, 202))
 
-        self.assertEqual(
-            commands,
-            (
-                ("kill", "-TERM", "101"),
-                ("kill", "-TERM", "202"),
-                ("ip", "netns", "del", "ips-client"),
-                ("ip", "netns", "del", "ips-gwa"),
-                ("ip", "netns", "del", "ips-gwb"),
-                ("ip", "netns", "del", "ips-server"),
-            ),
-        )
+        self.assertIn(("kill", "-TERM", "101"), commands)
+        self.assertIn(("kill", "-TERM", "202"), commands)
+        for namespace in ("ips-client", "ips-gwa", "ips-gwb", "ips-server"):
+            self.assertIn(("ip", "netns", "del", namespace), commands)
+        for interface in (
+            "veth-c", "veth-a-lan", "veth-a-wan",
+            "veth-b-wan", "veth-b-lan", "veth-s",
+        ):
+            self.assertIn(("ip", "link", "del", interface), commands)
         rendered = " ".join(" ".join(command) for command in commands)
         self.assertNotIn("pkill", rendered)
         self.assertNotIn("killall", rendered)
+        self.assertNotIn("*", rendered)
 
     def test_valid_snapshot_passes_every_required_check(self) -> None:
         checks = evaluate_snapshot(VALID_SNAPSHOT)

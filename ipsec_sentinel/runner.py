@@ -15,7 +15,12 @@ from ipsec_sentinel.artifacts import (
     write_success_artifacts,
     write_text_atomic,
 )
-from ipsec_sentinel.capture import CaptureSession, validate_pcap
+from ipsec_sentinel.capture import (
+    AUDIT_FILTER,
+    CaptureSession,
+    validate_pcap,
+    validate_wire_cleartext,
+)
 from ipsec_sentinel.command import run_checked
 from ipsec_sentinel.evidence import evaluate_baseline, evaluate_pfs, parse_ping, parse_sa
 from ipsec_sentinel.models import (
@@ -84,6 +89,19 @@ def execute_ordered_stages(
     return tuple(records)
 
 
+def run_cleanup_steps(
+    steps: tuple[tuple[str, Callable[[], None]], ...],
+) -> None:
+    errors: list[str] = []
+    for name, action in steps:
+        try:
+            action()
+        except BaseException as error:
+            errors.append(f"{name}: {error}")
+    if errors:
+        raise RuntimeError("cleanup errors: " + "; ".join(errors))
+
+
 def run_secure_baseline(
     scenario: str | Path,
     keep_lab: bool = False,
@@ -95,9 +113,28 @@ def run_secure_baseline(
     log = StringIO()
     topology = Topology(log)
     pair = StrongSwanPair(log)
-    temporary_pcap = Path("/tmp") / f"ipsec-sentinel-{run_id}.pcap"
-    capture_log = run_dir / "tcpdump.log"
-    capture = CaptureSession(temporary_pcap, capture_log)
+    capture_runtime = Path("/run/ipsec-sentinel") / run_id / "capture"
+    temporary_pcaps = {
+        "encrypted": capture_runtime / "encrypted.pcap",
+        "gateway-a": capture_runtime / "cleartext-audit-gateway-a.pcap",
+        "gateway-b": capture_runtime / "cleartext-audit-gateway-b.pcap",
+    }
+    captures = {
+        "encrypted": CaptureSession(
+            temporary_pcaps["encrypted"], run_dir / "tcpdump.log"
+        ),
+        "gateway-a": CaptureSession(
+            temporary_pcaps["gateway-a"],
+            run_dir / "tcpdump-audit-gateway-a.log",
+            capture_filter=AUDIT_FILTER,
+        ),
+        "gateway-b": CaptureSession(
+            temporary_pcaps["gateway-b"],
+            run_dir / "tcpdump-audit-gateway-b.log",
+            namespace="ips-gwb",
+            capture_filter=AUDIT_FILTER,
+        ),
+    }
     context: dict[str, object] = {}
 
     def preflight() -> None:
@@ -134,8 +171,11 @@ def run_secure_baseline(
         pair.start(run_dir)
 
     def capture_start() -> None:
+        capture_runtime.mkdir(parents=True, exist_ok=True, mode=0o700)
+        os.chmod(capture_runtime, 0o700)
         context["capture_started_at"] = time()
-        capture.start()
+        for capture in captures.values():
+            capture.start()
 
     def configuration_load() -> None:
         context["load"] = pair.load()
@@ -197,21 +237,39 @@ def run_secure_baseline(
             rekey.after_sas,
             rekey.log_segment,
             attempted=rekey.attempted,
+            completed=rekey.completed,
         )
 
     def capture_stop() -> None:
-        capture.stop()
+        _stop_captures(captures)
         context["capture_ended_at"] = time()
-        finalized = run_dir / "encrypted.pcap"
-        shutil.move(str(temporary_pcap), finalized)
-        context["pcap"] = finalized
+        finalized = {
+            "encrypted": run_dir / "encrypted.pcap",
+            "gateway-a": run_dir / "cleartext-audit-gateway-a.pcap",
+            "gateway-b": run_dir / "cleartext-audit-gateway-b.pcap",
+        }
+        for name, destination in finalized.items():
+            shutil.move(str(temporary_pcaps[name]), destination)
+        capture_runtime.rmdir()
+        context["pcaps"] = finalized
 
     def pcap_validation() -> None:
-        context["capture"] = validate_pcap(
-            context["pcap"],  # type: ignore[arg-type]
+        finalized = context["pcaps"]  # type: ignore[assignment]
+        capture_evidence = validate_pcap(
+            finalized["encrypted"],  # type: ignore[index]
             peers=("192.0.2.1", "192.0.2.2"),
             started_at=context["capture_started_at"],  # type: ignore[arg-type]
             ended_at=context["capture_ended_at"],  # type: ignore[arg-type]
+        )
+        cleartext_packets = validate_wire_cleartext(
+            finalized["gateway-a"],  # type: ignore[index]
+            finalized["gateway-b"],  # type: ignore[index]
+            started_at=context["capture_started_at"],  # type: ignore[arg-type]
+            ended_at=context["capture_ended_at"],  # type: ignore[arg-type]
+        )
+        context["capture"] = replace(
+            capture_evidence,
+            cleartext_packets=cleartext_packets,
         )
 
     def verdict() -> None:
@@ -269,11 +327,14 @@ def run_secure_baseline(
         _copy_strongswan_logs(run_dir, pair)
 
     def cleanup() -> None:
-        capture.stop()
-        _copy_strongswan_logs(run_dir, pair)
-        pair.stop()
+        steps: list[tuple[str, Callable[[], None]]] = [
+            ("capture_stop", lambda: _stop_captures(captures)),
+            ("log_copy", lambda: _copy_strongswan_logs(run_dir, pair)),
+            ("daemon_stop", pair.stop),
+        ]
         if not keep_lab:
-            topology.reset()
+            steps.append(("topology_reset", topology.reset))
+        run_cleanup_steps(tuple(steps))
 
     actions = {
         "preflight": preflight,
@@ -308,7 +369,10 @@ def run_secure_baseline(
             truth = replace(truth, status=status)
         else:
             truth = None
-        _publish_failure_artifacts(run_dir, log, context, verification, truth, temporary_pcap)
+        _publish_failure_artifacts(
+            run_dir, log, context, verification, truth,
+            temporary_pcaps, capture_runtime,
+        )
         failed_stage = next(
             (record.name for record in records if record.status != "PASS"),
             "unknown",
@@ -341,7 +405,8 @@ def _publish_failure_artifacts(
     context: dict[str, object],
     verification: Verification,
     truth: GroundTruth | None,
-    temporary_pcap: Path,
+    temporary_pcaps: dict[str, Path],
+    capture_runtime: Path,
 ) -> None:
     if "scenario_yaml" in context:
         write_text_atomic(run_dir / "scenario.yaml", context["scenario_yaml"])  # type: ignore[arg-type]
@@ -351,8 +416,23 @@ def _publish_failure_artifacts(
         if isinstance(values, dict):
             for gateway, value in values.items():
                 write_text_atomic(run_dir / f"{prefix}-{gateway}.txt", str(value))
-    if temporary_pcap.is_file() and not (run_dir / "encrypted.pcap").exists():
-        shutil.move(str(temporary_pcap), run_dir / "encrypted.pcap")
+    destinations = {
+        "encrypted": run_dir / "encrypted.pcap",
+        "gateway-a": run_dir / "cleartext-audit-gateway-a.pcap",
+        "gateway-b": run_dir / "cleartext-audit-gateway-b.pcap",
+    }
+    for name, temporary in temporary_pcaps.items():
+        if temporary.is_file() and not destinations[name].exists():
+            shutil.move(str(temporary), destinations[name])
+    try:
+        capture_runtime.rmdir()
+    except OSError:
+        pass
+    for parent in (capture_runtime.parent, capture_runtime.parent.parent):
+        try:
+            parent.rmdir()
+        except OSError:
+            pass
     _write_rekey_artifacts(run_dir, context.get("rekey"))
     publish_results(run_dir, verification, truth)
 
@@ -379,3 +459,9 @@ def _copy_strongswan_logs(run_dir: Path, pair: StrongSwanPair) -> None:
                 run_dir / f"strongswan-{gateway}.log",
                 files.log.read_text(encoding="utf-8", errors="replace"),
             )
+
+
+def _stop_captures(captures: dict[str, CaptureSession]) -> None:
+    run_cleanup_steps(
+        tuple((f"{name}_capture", capture.stop) for name, capture in captures.items())
+    )

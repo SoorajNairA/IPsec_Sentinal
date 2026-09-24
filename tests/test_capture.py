@@ -1,8 +1,14 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from unittest.mock import patch
+import subprocess
 import unittest
 
-from ipsec_sentinel.capture import CaptureValidationError, validate_pcap
+from ipsec_sentinel.capture import (
+    CaptureValidationError,
+    validate_pcap,
+    validate_wire_cleartext,
+)
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -65,6 +71,31 @@ class CaptureValidationTest(unittest.TestCase):
                 started_at=4_000_000_000,
                 ended_at=4_000_000_100,
             )
+
+    def test_cleartext_audit_requires_same_inner_packet_on_both_transit_endpoints(self) -> None:
+        one_sided = validate_wire_cleartext(
+            FIXTURES / "cleartext-icmp.pcap",
+            FIXTURES / "ike-esp.pcap",
+            started_at=FULL_WINDOW[0],
+            ended_at=FULL_WINDOW[1],
+        )
+        self.assertEqual(one_sided, 0)
+
+        with self.assertRaisesRegex(CaptureValidationError, "both transit endpoints"):
+            validate_wire_cleartext(
+                FIXTURES / "cleartext-icmp.pcap",
+                FIXTURES / "cleartext-icmp.pcap",
+                started_at=FULL_WINDOW[0],
+                ended_at=FULL_WINDOW[1],
+            )
+
+    def test_pcap_reader_timeout_is_a_validation_failure(self) -> None:
+        with patch(
+            "ipsec_sentinel.capture.subprocess.run",
+            side_effect=subprocess.TimeoutExpired(["tcpdump"], 5),
+        ):
+            with self.assertRaisesRegex(CaptureValidationError, "timed out"):
+                self.validate("ike-esp.pcap")
 
 
 if __name__ == "__main__":

@@ -58,6 +58,19 @@ class EvidenceParsingTest(unittest.TestCase):
         self.assertEqual(no_dh.status, "NOT_VERIFIED")
         self.assertEqual(unchanged.status, "NOT_VERIFIED")
 
+        one_sided = {
+            gateway: text.replace("c2ad5304", "a1a2a3a4")
+            for gateway, text in before.items()
+        }
+        incomplete = evaluate_pfs(
+            before, after, log, attempted=True, completed=False
+        )
+        self.assertEqual(
+            evaluate_pfs(before, one_sided, log, attempted=True).status,
+            "NOT_VERIFIED",
+        )
+        self.assertEqual(incomplete.status, "NOT_VERIFIED")
+
     def test_parser_uses_new_installed_child_while_old_child_is_deleted(self) -> None:
         text = (
             "state=ESTABLISHED child-sas {"
@@ -131,6 +144,23 @@ class EvidenceParsingTest(unittest.TestCase):
                 checks = {check.name: check.passed for check in result.checks}
                 self.assertEqual(result.status, "FAIL")
                 self.assertFalse(checks[check_name])
+
+    def test_xfrm_spis_must_match_reciprocal_child_sa_spis(self) -> None:
+        sas, xfrm, ping, capture = baseline_inputs()
+        xfrm["gateway-a"] = xfrm["gateway-a"].replace("0xcbecd5e6", "0xdeadbeef")
+
+        result = evaluate_baseline(sas, xfrm, ping, capture)
+        checks = {check.name: check.passed for check in result.checks}
+
+        self.assertEqual(result.status, "FAIL")
+        self.assertFalse(checks["xfrm.state.gateway-a"])
+
+        sas, xfrm, ping, capture = baseline_inputs()
+        sas["gateway-b"] = sas["gateway-b"].replace("spi-out=c2ad5304", "spi-out=deadbeef")
+        result = evaluate_baseline(sas, xfrm, ping, capture)
+        checks = {check.name: check.passed for check in result.checks}
+        self.assertEqual(result.status, "FAIL")
+        self.assertFalse(checks["child.spis.reciprocal"])
 
 
 if __name__ == "__main__":

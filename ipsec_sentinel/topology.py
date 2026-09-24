@@ -12,6 +12,10 @@ from ipsec_sentinel.models import Check
 
 NAMESPACES = ("ips-client", "ips-gwa", "ips-gwb", "ips-server")
 GATEWAYS = ("ips-gwa", "ips-gwb")
+ROOT_VETH_NAMES = (
+    "veth-c", "veth-a-lan", "veth-a-wan",
+    "veth-b-wan", "veth-b-lan", "veth-s",
+)
 SYSCTL_EXPECTATIONS = {
     "net.ipv4.ip_forward": "1",
     "net.ipv4.conf.all.rp_filter": "0",
@@ -104,6 +108,7 @@ class Topology:
     def reset_commands(tracked_pids: Iterable[int]) -> tuple[tuple[str, ...], ...]:
         commands = [("kill", "-TERM", str(pid)) for pid in tracked_pids]
         commands.extend(("ip", "netns", "del", namespace) for namespace in NAMESPACES)
+        commands.extend(("ip", "link", "del", interface) for interface in ROOT_VETH_NAMES)
         return tuple(commands)
 
     def track_pid(self, pid: int) -> None:

@@ -1,9 +1,28 @@
 import unittest
 
-from ipsec_sentinel.runner import ORDERED_STAGES, execute_ordered_stages
+from ipsec_sentinel.runner import ORDERED_STAGES, execute_ordered_stages, run_cleanup_steps
 
 
 class RunnerOrderTest(unittest.TestCase):
+    def test_cleanup_attempts_every_step_after_an_earlier_failure(self) -> None:
+        observed: list[str] = []
+
+        def failing_capture() -> None:
+            observed.append("capture")
+            raise RuntimeError("tcpdump already failed")
+
+        with self.assertRaisesRegex(RuntimeError, "capture_stop"):
+            run_cleanup_steps(
+                (
+                    ("capture_stop", failing_capture),
+                    ("log_copy", lambda: observed.append("logs")),
+                    ("daemon_stop", lambda: observed.append("daemons")),
+                    ("topology_reset", lambda: observed.append("topology")),
+                )
+            )
+
+        self.assertEqual(observed, ["capture", "logs", "daemons", "topology"])
+
     def actions(self, observed: list[str], fail_at: str | None = None):
         actions = {}
         for stage in ORDERED_STAGES:

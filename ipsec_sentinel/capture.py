@@ -4,6 +4,7 @@ from pathlib import Path
 from time import monotonic, sleep
 from typing import TextIO
 import os
+import re
 import signal
 import subprocess
 
@@ -13,6 +14,11 @@ from ipsec_sentinel.models import CaptureEvidence
 CAPTURE_FILTER = (
     "host 192.0.2.1 and host 192.0.2.2 and "
     "(udp port 500 or udp port 4500 or ip proto 50)"
+)
+AUDIT_FILTER = (
+    "(host 192.0.2.1 and host 192.0.2.2 and "
+    "(udp port 500 or udp port 4500 or ip proto 50)) or "
+    "(icmp and (net 10.10.0.0/24 or net 10.20.0.0/24))"
 )
 
 
@@ -30,6 +36,7 @@ class CaptureSession:
         interface: str = "wan0",
         timeout: float = 5,
         drain_seconds: float = 0.25,
+        capture_filter: str = CAPTURE_FILTER,
     ) -> None:
         self.pcap_path = pcap_path
         self.log_path = log_path
@@ -37,6 +44,7 @@ class CaptureSession:
         self.interface = interface
         self.timeout = timeout
         self.drain_seconds = drain_seconds
+        self.capture_filter = capture_filter
         self._process: subprocess.Popen[str] | None = None
         self._log: TextIO | None = None
 
@@ -67,7 +75,7 @@ class CaptureSession:
                 self.interface,
                 "-w",
                 str(self.pcap_path),
-                CAPTURE_FILTER,
+                self.capture_filter,
             ],
             stdout=subprocess.DEVNULL,
             stderr=self._log,
@@ -124,26 +132,7 @@ def validate_pcap(
     if not path.is_file() or path.stat().st_size == 0:
         raise CaptureValidationError("PCAP is missing or empty")
 
-    completed = subprocess.run(
-        ["tcpdump", "-tt", "-nn", "-r", str(path)],
-        text=True,
-        capture_output=True,
-        check=False,
-    )
-    if completed.returncode != 0:
-        raise CaptureValidationError(f"PCAP is empty or unreadable: {completed.stderr.strip()}")
-
-    packets: list[str] = []
-    for line in completed.stdout.splitlines():
-        fields = line.split(maxsplit=1)
-        if len(fields) != 2:
-            continue
-        try:
-            timestamp = float(fields[0])
-        except ValueError:
-            continue
-        if started_at <= timestamp <= ended_at:
-            packets.append(fields[1])
+    packets = _read_packets(path, started_at, ended_at)
 
     if not packets:
         raise CaptureValidationError("PCAP has no packets in the expected run window")
@@ -185,3 +174,67 @@ def validate_pcap(
         natt_packets=natt_packets,
         cleartext_packets=cleartext_packets,
     )
+
+
+def validate_wire_cleartext(
+    gateway_a_path: Path,
+    gateway_b_path: Path,
+    *,
+    started_at: float,
+    ended_at: float,
+) -> int:
+    a_packets = _read_packets(gateway_a_path, started_at, ended_at)
+    b_packets = _read_packets(gateway_b_path, started_at, ended_at)
+    a_signatures = {_icmp_signature(packet) for packet in a_packets}
+    b_signatures = {_icmp_signature(packet) for packet in b_packets}
+    a_signatures.discard(None)
+    b_signatures.discard(None)
+    correlated = a_signatures & b_signatures
+    if correlated:
+        raise CaptureValidationError(
+            f"protected cleartext ICMP appeared on both transit endpoints: {len(correlated)} packets"
+        )
+    return 0
+
+
+def _read_packets(path: Path, started_at: float, ended_at: float) -> list[str]:
+    if not path.is_file() or path.stat().st_size == 0:
+        raise CaptureValidationError(f"PCAP is missing or empty: {path}")
+    try:
+        completed = subprocess.run(
+            ["tcpdump", "-tt", "-nn", "-r", str(path)],
+            text=True,
+            capture_output=True,
+            timeout=5,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as error:
+        raise CaptureValidationError(f"PCAP reader timed out: {path}") from error
+    if completed.returncode != 0:
+        raise CaptureValidationError(f"PCAP is empty or unreadable: {completed.stderr.strip()}")
+    packets: list[str] = []
+    for line in completed.stdout.splitlines():
+        fields = line.split(maxsplit=1)
+        if len(fields) != 2:
+            continue
+        try:
+            timestamp = float(fields[0])
+        except ValueError:
+            continue
+        if started_at <= timestamp <= ended_at:
+            packets.append(fields[1])
+    return packets
+
+
+def _icmp_signature(packet: str) -> tuple[str, str, str, str, str] | None:
+    match = re.search(
+        r"IP (10\.(?:10|20)\.\d+\.\d+) > (10\.(?:10|20)\.\d+\.\d+): "
+        r"ICMP echo (request|reply), id (\d+), seq (\d+)",
+        packet,
+    )
+    if not match:
+        return None
+    source, destination, kind, identifier, sequence = match.groups()
+    if source.split(".")[1] == destination.split(".")[1]:
+        return None
+    return source, destination, kind, identifier, sequence

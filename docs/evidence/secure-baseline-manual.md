@@ -229,7 +229,7 @@ Automation was permitted to begin at this point. This manual milestone continues
 
 ## Automated Baseline and PFS Follow-up
 
-The completed runner preserves the manual gate and then performs a separate explicit CHILD_SA rekey. Representative final repeated runs are `runs/run_20260923T160214Z` and `runs/run_20260923T160231Z`.
+The completed runner preserves the manual gate and then performs a separate explicit CHILD_SA rekey. Representative post-review repeated runs are `runs/run_20260924T145925Z` and `runs/run_20260924T145941Z`.
 
 The initial and rekey evidence remained distinct:
 
@@ -237,8 +237,11 @@ The initial and rekey evidence remained distinct:
 configured.pfs = true
 initial CHILD_SA PFS status = NOT_TESTED
 explicit rekey attempted = true
-gateway-a CHILD SPIs: c4007784/cd3f980c -> cc480397/c097e4bd
-gateway-b CHILD SPIs: cd3f980c/c4007784 -> c097e4bd/cc480397
+gateway-a CHILD SPIs: c9404239/cbc02da9 -> cbc806b0/cd42cdd8
+gateway-b CHILD SPIs: cbc02da9/c9404239 -> cd42cdd8/cbc806b0
+rekey completed: true
+reciprocal SPIs: true
+both inbound and outbound SPIs changed: true
 selected rekey proposal: ESP:AES_GCM_16_256/ECP_384/NO_EXT_SEQ
 final observed.pfs.status = VERIFIED
 ```
@@ -251,17 +254,19 @@ CHILD SAs: INSTALLED on gateway A and gateway B
 XFRM: matching native-ESP tunnel state and out/fwd/in policies on both gateways
 ICMP: 5 transmitted, 5 received
 saved PCAP: 8 UDP/500 packets, 10 ESP packets, 0 UDP/4500 packets
-protected cleartext packets in the outer-peer-filtered PCAP: 0
+protected cleartext packet fingerprints correlated across both transit endpoints: 0
+gateway-a audit: 5 post-decryption replies, 0 requests
+gateway-b audit: 5 post-decryption requests, 0 replies
 overall verification: PASS
 ```
 
 Independent saved-PCAP validation produced identical protocol counts in both final runs:
 
 ```text
-run_20260923T160214Z sha256 9d9e460ba88252595b2a30725b24c1993c22286c4f1787c4c501dc04295da23f
-run_20260923T160231Z sha256 fa900ae97eb0c172dc33bb9fe944c472af74fbc993c9db86272d7f9b4dd4ace8
+run_20260924T145925Z sha256 a3deccc61c598bccd29b1ea43f8c8ed9b33820c64a414a39fbb96d5170849580
+run_20260924T145941Z sha256 5f99e69c3be70399723823cdde14aa3eb4872034dc52df6f664168fff7973359
 ```
 
-The automated capture uses tcpdump immediate mode so packets received just before bounded SIGINT shutdown are published to the PCAP. The run directory retains the initial SA views, before/after-rekey SA views, XFRM snapshots, the rekey-only strongSwan log segment, full daemon logs, PCAP, scenario, run log, verification, and ground truth.
+The automated capture uses tcpdump immediate mode so packets received just before bounded SIGINT shutdown are published to the PCAP. The run directory retains the initial SA views, before/after-rekey SA views, XFRM snapshots, the rekey-only strongSwan log segment, full daemon logs, the filtered outer PCAP, two broad endpoint-audit PCAPs, scenario, run log, verification, and ground truth.
 
-The broad-capture WSL2 endpoint-veth limitation described above still applies. Consequently, the zero-cleartext count is scoped to the outer-peer capture filter and is corroborated by the separate XFRM and bidirectional ESP evidence.
+The broad-capture WSL2 endpoint-veth limitation described above still applies. The validator accounts for it by fingerprinting protected ICMP on both gateway transit endpoints: a true on-wire cleartext packet would occur in both captures, whereas the post-decryption artifact appears only at its receiving endpoint. Any matching source/destination/type/id/sequence fingerprint fails the run. The CHILD SPIs must also match reciprocal, direction-correlated XFRM states and policies.
