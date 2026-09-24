@@ -194,6 +194,22 @@ class StrongSwanPair:
         for output in self._stdout_files.values():
             output.close()
         self._stdout_files.clear()
+        runtime_dirs: set[Path] = set()
+        for files in self.files.values():
+            runtime_dirs.add(files.socket.parent)
+            files.socket.unlink(missing_ok=True)
+            files.pid.unlink(missing_ok=True)
+            files.log.unlink(missing_ok=True)
+        for directory in sorted(runtime_dirs, key=lambda path: len(path.parts), reverse=True):
+            try:
+                directory.rmdir()
+            except OSError:
+                pass
+        for parent in {directory.parent for directory in runtime_dirs}:
+            try:
+                parent.rmdir()
+            except OSError:
+                pass
 
     def _swanctl(self, name: str, operation: str, *arguments: str):
         if name not in self.files:

@@ -225,4 +225,43 @@ The manual gate passed because all required evidence agreed:
 - the IKEv2 exchange was captured on UDP/500; and
 - no NAT-T traffic appeared.
 
-Automation may now begin. PFS remains `NOT_TESTED` until the later explicit CHILD_SA rekey check.
+Automation was permitted to begin at this point. This manual milestone continues to record PFS as `NOT_TESTED`; later automated rekey evidence does not retroactively change what the initial CHILD_SA alone proved.
+
+## Automated Baseline and PFS Follow-up
+
+The completed runner preserves the manual gate and then performs a separate explicit CHILD_SA rekey. Representative final repeated runs are `runs/run_20260923T160214Z` and `runs/run_20260923T160231Z`.
+
+The initial and rekey evidence remained distinct:
+
+```text
+configured.pfs = true
+initial CHILD_SA PFS status = NOT_TESTED
+explicit rekey attempted = true
+gateway-a CHILD SPIs: c4007784/cd3f980c -> cc480397/c097e4bd
+gateway-b CHILD SPIs: cd3f980c/c4007784 -> c097e4bd/cc480397
+selected rekey proposal: ESP:AES_GCM_16_256/ECP_384/NO_EXT_SEQ
+final observed.pfs.status = VERIFIED
+```
+
+The same run independently recorded:
+
+```text
+IKE SAs: ESTABLISHED on gateway A and gateway B
+CHILD SAs: INSTALLED on gateway A and gateway B
+XFRM: matching native-ESP tunnel state and out/fwd/in policies on both gateways
+ICMP: 5 transmitted, 5 received
+saved PCAP: 8 UDP/500 packets, 10 ESP packets, 0 UDP/4500 packets
+protected cleartext packets in the outer-peer-filtered PCAP: 0
+overall verification: PASS
+```
+
+Independent saved-PCAP validation produced identical protocol counts in both final runs:
+
+```text
+run_20260923T160214Z sha256 9d9e460ba88252595b2a30725b24c1993c22286c4f1787c4c501dc04295da23f
+run_20260923T160231Z sha256 fa900ae97eb0c172dc33bb9fe944c472af74fbc993c9db86272d7f9b4dd4ace8
+```
+
+The automated capture uses tcpdump immediate mode so packets received just before bounded SIGINT shutdown are published to the PCAP. The run directory retains the initial SA views, before/after-rekey SA views, XFRM snapshots, the rekey-only strongSwan log segment, full daemon logs, PCAP, scenario, run log, verification, and ground truth.
+
+The broad-capture WSL2 endpoint-veth limitation described above still applies. Consequently, the zero-cleartext count is scoped to the outer-peer capture filter and is corroborated by the separate XFRM and bidirectional ESP evidence.

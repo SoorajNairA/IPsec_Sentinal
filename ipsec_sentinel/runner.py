@@ -266,9 +266,11 @@ def run_secure_baseline(
             ground_truth=context["ground_truth"],  # type: ignore[arg-type]
         )
         _write_rekey_artifacts(run_dir, context.get("rekey"))
+        _copy_strongswan_logs(run_dir, pair)
 
     def cleanup() -> None:
         capture.stop()
+        _copy_strongswan_logs(run_dir, pair)
         pair.stop()
         if not keep_lab:
             topology.reset()
@@ -368,3 +370,12 @@ def _write_rekey_artifacts(run_dir: Path, value: object) -> None:
             run_dir / f"swanctl-after-rekey-{gateway}.txt",
             value.after_sas[gateway],
         )
+
+
+def _copy_strongswan_logs(run_dir: Path, pair: StrongSwanPair) -> None:
+    for gateway, files in pair.files.items():
+        if files.log.is_file():
+            write_text_atomic(
+                run_dir / f"strongswan-{gateway}.log",
+                files.log.read_text(encoding="utf-8", errors="replace"),
+            )

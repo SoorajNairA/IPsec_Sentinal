@@ -26,6 +26,8 @@ class SecureBaselineIntegrationTest(unittest.TestCase):
             self.assertTrue(
                 REQUIRED_SUCCESS_FILES.issubset({path.name for path in run_dir.iterdir()})
             )
+            self.assertTrue((run_dir / "strongswan-gateway-a.log").is_file())
+            self.assertTrue((run_dir / "strongswan-gateway-b.log").is_file())
             self.assertEqual(
                 json.loads((run_dir / "verification.json").read_text())["status"],
                 "PASS",
@@ -44,6 +46,7 @@ class SecureBaselineIntegrationTest(unittest.TestCase):
                 timeout=5,
             ).stdout
             self.assertNotIn("ips-gwa", namespaces)
+            self.assertFalse((Path("/run/ipsec-sentinel") / run_dir.name).exists())
 
 
 if __name__ == "__main__":
