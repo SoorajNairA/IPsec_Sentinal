@@ -22,7 +22,9 @@ class DatasetCliTest(unittest.TestCase):
         with redirect_stdout(output):
             code = main(["list-traffic"])
         self.assertEqual(code, 0)
-        self.assertEqual(output.getvalue().splitlines(), ["icmp", "video", "web"])
+        self.assertEqual(
+            output.getvalue().splitlines(), ["icmp", "video", "voip", "web"]
+        )
 
     def test_generate_passes_resume_to_orchestrator(self) -> None:
         observed: list[tuple[str, bool]] = []

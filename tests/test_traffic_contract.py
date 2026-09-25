@@ -44,6 +44,10 @@ class TrafficContractTest(unittest.TestCase):
     def setUpClass(cls) -> None:
         register_generator("example", lambda seed: ExampleGenerator())
 
+    @classmethod
+    def tearDownClass(cls) -> None:
+        traffic_base._REGISTRY.pop("example", None)
+
     def test_registry_returns_a_runtime_conforming_generator(self) -> None:
         generator = create_generator("example", seed=7)
         self.assertIsInstance(generator, TrafficGenerator)

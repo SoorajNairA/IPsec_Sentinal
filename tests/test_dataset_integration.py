@@ -188,6 +188,9 @@ class DatasetIntegrationTest(unittest.TestCase):
     def test_real_video_dataset_run(self) -> None:
         self.run_class("video", 3001)
 
+    def test_real_voip_dataset_run(self) -> None:
+        self.run_class("voip", 4001)
+
     def test_retry_creates_a_new_tunnel_session_and_resume_skips_passes(self) -> None:
         dataset_name = "integration-retry-4001"
         config = write_one_slot_config(
