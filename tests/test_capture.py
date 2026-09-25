@@ -5,6 +5,7 @@ import subprocess
 import unittest
 
 from ipsec_sentinel.capture import (
+    CaptureSession,
     CaptureValidationError,
     validate_capture_log,
     validate_pcap,
@@ -25,6 +26,12 @@ class CaptureValidationTest(unittest.TestCase):
             started_at=FULL_WINDOW[0],
             ended_at=FULL_WINDOW[1],
         )
+
+    def test_capture_command_uses_explicit_buffer_for_bulk_workloads(self) -> None:
+        session = CaptureSession(Path("bulk.pcap"), Path("tcpdump.log"))
+        command = session.command()
+        buffer_index = command.index("-B")
+        self.assertEqual(command[buffer_index + 1], "32768")
 
     def test_accepts_only_peer_matched_ike_and_native_esp(self) -> None:
         evidence = self.validate("ike-esp.pcap")

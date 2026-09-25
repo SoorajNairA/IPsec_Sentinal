@@ -150,12 +150,12 @@ class DatasetIntegrationTest(unittest.TestCase):
     def run_class(
         self, traffic_class: str, seed: int
     ) -> tuple[Path, dict[str, object]]:
-        dataset_name = f"integration-{traffic_class}-{seed}"
+        dataset_name = f"integration-{traffic_class.replace('_', '-')}-{seed}"
         config = write_one_slot_config(
             self.root, dataset_name, traffic_class, seed
         )
         summary = generate_dataset(config, self.root / "dataset")
-        self.assertEqual(summary.successful_runs, 1)
+        self.assertEqual(summary.successful_runs, 1, summary)
         self.assertEqual(summary.training_ready_runs, 1)
         run_dir = next(
             path
@@ -196,6 +196,9 @@ class DatasetIntegrationTest(unittest.TestCase):
 
     def test_real_messaging_dataset_run(self) -> None:
         self.run_class("messaging", 6001)
+
+    def test_real_file_transfer_dataset_run(self) -> None:
+        self.run_class("file_transfer", 7001)
 
     def test_retry_creates_a_new_tunnel_session_and_resume_skips_passes(self) -> None:
         dataset_name = "integration-retry-4001"

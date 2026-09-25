@@ -37,7 +37,10 @@ class CaptureSession:
         timeout: float = 5,
         drain_seconds: float = 0.25,
         capture_filter: str = CAPTURE_FILTER,
+        capture_buffer_kib: int = 32 * 1024,
     ) -> None:
+        if capture_buffer_kib <= 0:
+            raise ValueError("capture buffer must be positive")
         self.pcap_path = pcap_path
         self.log_path = log_path
         self.namespace = namespace
@@ -45,12 +48,32 @@ class CaptureSession:
         self.timeout = timeout
         self.drain_seconds = drain_seconds
         self.capture_filter = capture_filter
+        self.capture_buffer_kib = capture_buffer_kib
         self._process: subprocess.Popen[str] | None = None
         self._log: TextIO | None = None
 
     @property
     def pid(self) -> int | None:
         return self._process.pid if self._process is not None else None
+
+    def command(self) -> list[str]:
+        return [
+            "ip",
+            "netns",
+            "exec",
+            self.namespace,
+            "tcpdump",
+            "--immediate-mode",
+            "-U",
+            "-n",
+            "-B",
+            str(self.capture_buffer_kib),
+            "-i",
+            self.interface,
+            "-w",
+            str(self.pcap_path),
+            self.capture_filter,
+        ]
 
     def start(self) -> int:
         if os.geteuid() != 0:
@@ -62,21 +85,7 @@ class CaptureSession:
         self.pcap_path.unlink(missing_ok=True)
         self._log = self.log_path.open("w", encoding="utf-8")
         self._process = subprocess.Popen(
-            [
-                "ip",
-                "netns",
-                "exec",
-                self.namespace,
-                "tcpdump",
-                "--immediate-mode",
-                "-U",
-                "-n",
-                "-i",
-                self.interface,
-                "-w",
-                str(self.pcap_path),
-                self.capture_filter,
-            ],
+            self.command(),
             stdout=subprocess.DEVNULL,
             stderr=self._log,
             text=True,
