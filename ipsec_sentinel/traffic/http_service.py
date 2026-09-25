@@ -6,13 +6,12 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import json
 from pathlib import Path
 import signal
-import subprocess
-import sys
 import time
 from typing import Any
 
 from ipsec_sentinel.artifacts import write_text_atomic
 from ipsec_sentinel.traffic.base import TrafficContext
+from ipsec_sentinel.traffic.process import NamespaceServiceProcess
 
 
 def deterministic_body(seed: int, path: str, size: int) -> bytes:
@@ -101,67 +100,26 @@ def serve(config_path: Path, receipt_path: Path, ready_path: Path) -> None:
         server.server_close()
 
 
-class HttpServiceProcess:
+class HttpServiceProcess(NamespaceServiceProcess):
     def __init__(
         self, context: TrafficContext, config_path: Path, receipt_path: Path, ready_path: Path
     ) -> None:
-        self.context = context
+        super().__init__(
+            context,
+            module="ipsec_sentinel.traffic.http_service",
+            arguments=(
+            "--config",
+            str(config_path),
+            "--receipts",
+            str(receipt_path),
+            "--ready",
+            str(ready_path),
+            ),
+            ready_path=ready_path,
+            log_name=f"{config_path.stem}.log",
+        )
         self.config_path = config_path
         self.receipt_path = receipt_path
-        self.ready_path = ready_path
-        self.process: subprocess.Popen[str] | None = None
-        self.output = None
-
-    def start(self) -> None:
-        if self.process is not None:
-            raise RuntimeError("HTTP service already started")
-        self.ready_path.unlink(missing_ok=True)
-        log_path = self.context.run_dir / "http-service.log"
-        self.output = log_path.open("w", encoding="utf-8")
-        argv = [
-            "ip",
-            "netns",
-            "exec",
-            self.context.server_namespace,
-            sys.executable,
-            "-m",
-            "ipsec_sentinel.traffic.http_service",
-            "--config",
-            str(self.config_path),
-            "--receipts",
-            str(self.receipt_path),
-            "--ready",
-            str(self.ready_path),
-        ]
-        self.context.log.write("$ " + " ".join(argv) + "\n")
-        self.context.log.flush()
-        self.process = subprocess.Popen(
-            argv, stdout=self.output, stderr=subprocess.STDOUT, text=True
-        )
-        deadline = time.monotonic() + 10.0
-        while time.monotonic() < deadline:
-            if self.ready_path.is_file():
-                return
-            if self.process.poll() is not None:
-                raise RuntimeError(f"HTTP service exited with {self.process.returncode}")
-            time.sleep(0.05)
-        self.stop()
-        raise TimeoutError("HTTP service readiness timed out")
-
-    def stop(self) -> None:
-        process, self.process = self.process, None
-        try:
-            if process is not None and process.poll() is None:
-                process.terminate()
-                try:
-                    process.wait(timeout=5)
-                except subprocess.TimeoutExpired:
-                    process.kill()
-                    process.wait(timeout=5)
-        finally:
-            if self.output is not None:
-                self.output.close()
-                self.output = None
 
 
 def main(argv: list[str] | None = None) -> int:

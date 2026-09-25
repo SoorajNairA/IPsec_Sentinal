@@ -16,6 +16,8 @@ class VideoGeneratorTest(unittest.TestCase):
         self.assertTrue(
             all(segment.path.startswith("/video/segment-") for segment in plan.segments)
         )
+        self.assertTrue(20_000 <= plan.preferred_port <= 29_999)
+        self.assertNotEqual(plan.preferred_port, resolve_video_plan(302).preferred_port)
 
     def test_one_large_response_cannot_validate_as_video(self) -> None:
         plan = resolve_video_plan(301)

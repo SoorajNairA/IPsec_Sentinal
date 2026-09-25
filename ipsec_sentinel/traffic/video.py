@@ -14,6 +14,11 @@ from ipsec_sentinel.traffic.base import (
     TrafficValidation,
 )
 from ipsec_sentinel.traffic.http_service import HttpServiceProcess
+from ipsec_sentinel.traffic.ports import (
+    PortSelection,
+    choose_available_port,
+    select_port_candidates,
+)
 
 
 @dataclass(frozen=True)
@@ -33,7 +38,7 @@ class VideoSegment:
 
 @dataclass(frozen=True)
 class VideoPlan:
-    port: int
+    preferred_port: int
     profile: VideoProfile
     target_duration_seconds: float
     segments: tuple[VideoSegment, ...]
@@ -71,7 +76,7 @@ def resolve_video_plan(seed: int) -> VideoPlan:
         for index in range(segment_count)
     )
     return VideoPlan(
-        8081,
+        select_port_candidates(seed, "video", "tcp")[0],
         profile,
         sum(segment.pace_after_seconds for segment in segments),
         segments,
@@ -122,12 +127,13 @@ def validate_video_result(
 
 class VideoGenerator:
     name = "video"
-    version = "1"
+    version = "2"
 
     def __init__(self, seed: int) -> None:
         self.seed = seed
         self.plan = resolve_video_plan(seed)
         self.service: HttpServiceProcess | None = None
+        self.port_selection: PortSelection | None = None
         self.client_records: list[dict[str, object]] = []
         self.server_receipts: list[dict[str, object]] = []
         self.realized_duration_seconds = 0.0
@@ -144,11 +150,14 @@ class VideoGenerator:
 
     def prepare(self, context: TrafficContext) -> None:
         service_path, receipts, ready, _, _ = self._paths(context)
+        self.port_selection = choose_available_port(
+            context, self.seed, "video", "tcp"
+        )
         write_json_atomic(
             service_path,
             {
                 "bind_address": context.server_ip,
-                "port": self.plan.port,
+                "port": self.port_selection.port,
                 "seed": self.seed,
                 "resources": [
                     {
@@ -164,12 +173,14 @@ class VideoGenerator:
         self.service.start()
 
     def run(self, context: TrafficContext) -> TrafficRunResult:
+        if self.port_selection is None:
+            raise RuntimeError("video generator is not prepared")
         _, receipts, _, client_path, results_path = self._paths(context)
         write_json_atomic(
             client_path,
             {
                 "server_ip": context.server_ip,
-                "port": self.plan.port,
+                "port": self.port_selection.port,
                 "timeout_seconds": 5,
                 "requests": [
                     {
@@ -241,7 +252,10 @@ class VideoGenerator:
             "generator_version": self.version,
             "seed": self.seed,
             "parameters": {
-                "port": self.plan.port,
+                "preferred_port": self.plan.preferred_port,
+                "selected_port": None if self.port_selection is None else self.port_selection.port,
+                "candidate_index": None if self.port_selection is None else self.port_selection.candidate_index,
+                "rejected_ports": [] if self.port_selection is None else list(self.port_selection.rejected_ports),
                 "profile": asdict(self.plan.profile),
                 "target_duration_seconds": self.plan.target_duration_seconds,
                 "segments": [asdict(segment) for segment in self.plan.segments],

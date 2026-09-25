@@ -11,6 +11,8 @@ class WebGeneratorTest(unittest.TestCase):
         self.assertNotEqual(first, resolve_web_plan(102))
         self.assertGreaterEqual(len(first.requests), 6)
         self.assertTrue(all(request.think_seconds >= 0 for request in first.requests))
+        self.assertTrue(20_000 <= first.preferred_port <= 29_999)
+        self.assertNotEqual(first.preferred_port, resolve_web_plan(102).preferred_port)
 
     def test_deterministic_body_has_exact_size(self) -> None:
         first = deterministic_body(seed=101, path="/assets/a.bin", size=4096)

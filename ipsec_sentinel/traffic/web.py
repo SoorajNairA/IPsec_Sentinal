@@ -14,6 +14,11 @@ from ipsec_sentinel.traffic.base import (
     TrafficValidation,
 )
 from ipsec_sentinel.traffic.http_service import HttpServiceProcess
+from ipsec_sentinel.traffic.ports import (
+    PortSelection,
+    choose_available_port,
+    select_port_candidates,
+)
 
 
 @dataclass(frozen=True)
@@ -26,7 +31,7 @@ class WebRequest:
 
 @dataclass(frozen=True)
 class WebPlan:
-    port: int
+    preferred_port: int
     requests: tuple[WebRequest, ...]
 
 
@@ -58,7 +63,10 @@ def resolve_web_plan(seed: int) -> WebPlan:
         WebRequest(path, size, content_type, random.choice((0.02, 0.05, 0.1)))
         for path, size, content_type in pages[:request_count]
     )
-    return WebPlan(port=8080, requests=requests)
+    return WebPlan(
+        preferred_port=select_port_candidates(seed, "web", "tcp")[0],
+        requests=requests,
+    )
 
 
 def _core(record: dict[str, object]) -> dict[str, object]:
@@ -94,12 +102,13 @@ def validate_web_result(
 
 class WebGenerator:
     name = "web"
-    version = "1"
+    version = "2"
 
     def __init__(self, seed: int) -> None:
         self.seed = seed
         self.plan = resolve_web_plan(seed)
         self.service: HttpServiceProcess | None = None
+        self.port_selection: PortSelection | None = None
         self.client_records: list[dict[str, object]] = []
         self.server_receipts: list[dict[str, object]] = []
         self._result: TrafficRunResult | None = None
@@ -115,11 +124,14 @@ class WebGenerator:
 
     def prepare(self, context: TrafficContext) -> None:
         service_path, receipts, ready, _, _ = self._paths(context)
+        self.port_selection = choose_available_port(
+            context, self.seed, "web", "tcp"
+        )
         write_json_atomic(
             service_path,
             {
                 "bind_address": context.server_ip,
-                "port": self.plan.port,
+                "port": self.port_selection.port,
                 "seed": self.seed,
                 "resources": [
                     {
@@ -135,12 +147,14 @@ class WebGenerator:
         self.service.start()
 
     def run(self, context: TrafficContext) -> TrafficRunResult:
+        if self.port_selection is None:
+            raise RuntimeError("web generator is not prepared")
         _, receipts, _, client_path, results_path = self._paths(context)
         write_json_atomic(
             client_path,
             {
                 "server_ip": context.server_ip,
-                "port": self.plan.port,
+                "port": self.port_selection.port,
                 "timeout_seconds": 5,
                 "requests": [asdict(request) for request in self.plan.requests],
             },
@@ -199,7 +213,10 @@ class WebGenerator:
             "generator_version": self.version,
             "seed": self.seed,
             "parameters": {
-                "port": self.plan.port,
+                "preferred_port": self.plan.preferred_port,
+                "selected_port": None if self.port_selection is None else self.port_selection.port,
+                "candidate_index": None if self.port_selection is None else self.port_selection.candidate_index,
+                "rejected_ports": [] if self.port_selection is None else list(self.port_selection.rejected_ports),
                 "requests": [asdict(request) for request in self.plan.requests],
             },
             "result": {} if self._result is None else dict(self._result.metrics),
