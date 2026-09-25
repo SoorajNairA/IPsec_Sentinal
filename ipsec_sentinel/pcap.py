@@ -33,6 +33,14 @@ class PcapSummary:
 
 
 @dataclass(frozen=True)
+class EspPacket:
+    timestamp_ns: int
+    relative_time_seconds: float
+    length: int
+    direction: str
+
+
+@dataclass(frozen=True)
 class _Record:
     header: bytes
     payload: bytes
@@ -161,7 +169,19 @@ def derive_workload_esp(
 def inspect_ml_pcap(
     path: Path, window: WorkloadWindow, peers: tuple[str, str]
 ) -> PcapSummary:
-    timestamps: list[int] = []
+    packets = read_ml_esp_packets(path, window, peers)
+    timestamps = [packet.timestamp_ns for packet in packets]
+    return _summary(len(timestamps), path.stat().st_size, timestamps)
+
+
+def read_ml_esp_packets(
+    path: Path, window: WorkloadWindow, peers: tuple[str, str]
+) -> tuple[EspPacket, ...]:
+    if len(peers) != 2 or peers[0] == peers[1]:
+        raise ValueError("ML capture peers must be two distinct addresses")
+    packets: list[EspPacket] = []
+    first_timestamp: int | None = None
+    previous_timestamp: int | None = None
     with path.open("rb") as source:
         _, endian, fraction_to_ns = _read_header(source)
         for record in _records(source, endian, fraction_to_ns):
@@ -172,7 +192,21 @@ def inspect_ml_pcap(
                 raise PcapFormatError("ML capture contains a wrong-peer packet")
             if not window.started_unix_ns <= record.timestamp_ns <= window.finished_unix_ns:
                 raise PcapFormatError("ML capture contains an out-of-window packet")
-            timestamps.append(record.timestamp_ns)
-    if not timestamps:
+            if previous_timestamp is not None and record.timestamp_ns < previous_timestamp:
+                raise PcapFormatError("ML capture timestamps are not monotonic")
+            first_timestamp = (
+                record.timestamp_ns if first_timestamp is None else first_timestamp
+            )
+            direction = "forward" if outer[:2] == peers else "reverse"
+            packets.append(
+                EspPacket(
+                    record.timestamp_ns,
+                    (record.timestamp_ns - first_timestamp) / 1_000_000_000,
+                    len(record.payload),
+                    direction,
+                )
+            )
+            previous_timestamp = record.timestamp_ns
+    if not packets:
         raise PcapFormatError("ML capture contains zero ESP records")
-    return _summary(len(timestamps), path.stat().st_size, timestamps)
+    return tuple(packets)
