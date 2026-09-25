@@ -16,6 +16,7 @@ class DatasetSummaryTest(unittest.TestCase):
                 3, {"icmp": 1, "video": 1, "web": 1},
                 {"traffic_generator_failed": 1}, 42, 4096, 3.5,
                 "2026-09-25T00:00:00Z", "2026-09-25T00:00:01Z",
+                3, 0, {"icmp": 1, "video": 1, "web": 1}, {},
             )
             write_summary(root / "dataset_summary.json", summary)
             payload = json.loads((root / "dataset_summary.json").read_text())
@@ -23,6 +24,8 @@ class DatasetSummaryTest(unittest.TestCase):
             self.assertEqual(payload["class_distribution"], {
                 "icmp": 1, "video": 1, "web": 1,
             })
+            self.assertEqual(payload["supervised_ready_runs"], 3)
+            self.assertEqual(payload["ood_ready_runs"], 0)
             self.assertEqual(list(root.glob("*.tmp")), [])
 
 

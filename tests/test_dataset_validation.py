@@ -47,7 +47,11 @@ class OfflineValidationTest(unittest.TestCase):
                 "schema_version": "ipsec-sentinel.dataset-ground-truth/v1",
                 "run_id": plan.attempt_id, "slot_id": plan.slot_id,
                 "attempt_number": 1, "status": "PASS", "training_ready": True,
-                "cleanup_status": "PASS", "traffic": {"class": "icmp", "seed": plan.seed},
+                "cleanup_status": "PASS", "traffic": {
+                    "class": "icmp", "seed": plan.seed,
+                    "known_training_class": True, "class_role": "supervised",
+                    "generator_version": "1",
+                },
                 "capture": {
                     "workload_started_unix_ns": 1_000_000_000,
                     "workload_finished_unix_ns": 2_000_000_000,
@@ -63,7 +67,10 @@ class OfflineValidationTest(unittest.TestCase):
                 "verification.json": {"run_id": plan.attempt_id, "status": "PASS",
                                       "checks": [{"passed": True}]},
                 "traffic.json": {"schema_version": "ipsec-sentinel.traffic/v1",
-                                 "class": "icmp", "seed": plan.seed},
+                                 "class": "icmp", "seed": plan.seed,
+                                 "known_training_class": True,
+                                 "class_role": "supervised",
+                                 "generator_version": "1"},
                 "environment.json": {"matrix_fingerprint": "f" * 64,
                                      "random_seed": plan.seed},
             }.items():
@@ -104,6 +111,17 @@ class OfflineValidationTest(unittest.TestCase):
         self.assertTrue(report.manifest_readable)
         self.assertEqual(report.valid_runs, 0)
         self.assertEqual(report.failed_runs, 1)
+
+    def test_rejects_role_disagreement_between_manifest_and_traffic_json(self) -> None:
+        temporary, root = self.build_dataset()
+        self.addCleanup(temporary.cleanup)
+        path = root / "runs/run_000001/traffic.json"
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        payload["known_training_class"] = False
+        write_json_atomic(path, payload)
+        report = validate_dataset(root)
+        self.assertFalse(report.passed)
+        self.assertIn("role mismatch", " ".join(report.errors))
 
 
 if __name__ == "__main__":

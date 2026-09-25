@@ -4,9 +4,11 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
-from ipsec_sentinel.dataset.manifest import AttemptRecord, Manifest
+from ipsec_sentinel.dataset.manifest import AttemptRecord, Manifest, SlotRecord
 from ipsec_sentinel.dataset.models import RunState, WorkloadWindow
 from ipsec_sentinel.pcap import inspect_ml_pcap
+from ipsec_sentinel.traffic import register_builtin_generators
+from ipsec_sentinel.traffic.base import is_supervised_eligible, traffic_spec
 
 
 @dataclass(frozen=True)
@@ -21,7 +23,7 @@ class DatasetValidationReport:
 
 def _validate_json_agreement(
     attempt: AttemptRecord,
-    traffic_class: str,
+    slot: SlotRecord,
     fingerprint: str,
     truth: dict[str, object],
     verification: dict[str, object],
@@ -42,10 +44,29 @@ def _validate_json_agreement(
     ):
         raise ValueError("verification contains a failed or missing check")
     truth_traffic = truth.get("traffic")
-    if not isinstance(truth_traffic, dict) or truth_traffic.get("class") != traffic_class:
+    if not isinstance(truth_traffic, dict) or truth_traffic.get("class") != slot.traffic_class:
         raise ValueError("manifest/ground-truth traffic label mismatch")
-    if traffic.get("class") != traffic_class:
+    if traffic.get("class") != slot.traffic_class:
         raise ValueError("manifest/traffic label mismatch")
+    expected_role = (slot.known_training_class, slot.class_role)
+    if (
+        (truth_traffic.get("known_training_class"), truth_traffic.get("class_role"))
+        != expected_role
+        or (traffic.get("known_training_class"), traffic.get("class_role"))
+        != expected_role
+    ):
+        raise ValueError("manifest/artifact traffic role mismatch")
+    spec = traffic_spec(slot.traffic_class)
+    if spec.known_training_class != slot.known_training_class:
+        raise ValueError("registry/manifest traffic role mismatch")
+    if slot.class_role == "supervised" and not is_supervised_eligible(
+        slot.traffic_class, slot.known_training_class
+    ):
+        raise ValueError("manifest traffic class is not supervised-eligible")
+    if truth_traffic.get("generator_version") != slot.generator_version or traffic.get(
+        "generator_version"
+    ) != slot.generator_version:
+        raise ValueError("manifest/artifact generator version mismatch")
     if truth_traffic.get("seed") != attempt.seed or traffic.get("seed") != attempt.seed:
         raise ValueError("manifest/traffic seed mismatch")
     if environment.get("random_seed") != attempt.seed:
@@ -62,6 +83,7 @@ def _validate_json_agreement(
 
 
 def validate_dataset(dataset_root: Path) -> DatasetValidationReport:
+    register_builtin_generators()
     try:
         manifest = Manifest.open_existing(dataset_root / "manifest.sqlite3")
     except (OSError, ValueError) as error:
@@ -73,8 +95,8 @@ def validate_dataset(dataset_root: Path) -> DatasetValidationReport:
             "SELECT matrix_fingerprint FROM datasets"
         ).fetchone()
         fingerprint = dataset[0]
-        classes = {slot.slot_id: slot.traffic_class for slot in manifest.slots()}
-        for attempt in manifest.training_ready_attempts():
+        slots = {slot.slot_id: slot for slot in manifest.slots()}
+        for attempt in manifest.quality_ready_attempts():
             run_dir = dataset_root / attempt.artifact_path
             try:
                 truth = json.loads(
@@ -91,7 +113,7 @@ def validate_dataset(dataset_root: Path) -> DatasetValidationReport:
                 )
                 _validate_json_agreement(
                     attempt,
-                    classes[attempt.slot_id],
+                    slots[attempt.slot_id],
                     fingerprint,
                     truth,
                     verification,

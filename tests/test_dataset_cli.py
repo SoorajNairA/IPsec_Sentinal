@@ -10,6 +10,7 @@ def passing_summary():
     return SimpleNamespace(
         dataset_name="test", planned_runs=1, successful_runs=1, failed_runs=0,
         incomplete_runs=0, training_ready_runs=1, class_distribution={"icmp": 1},
+        supervised_ready_runs=1, ood_ready_runs=0,
         total_esp_packets=10, total_capture_bytes=100, total_duration_seconds=1.0,
         failures_by_class={},
     )

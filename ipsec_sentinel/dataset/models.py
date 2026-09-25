@@ -10,7 +10,7 @@ DATASET_SCHEMA_VERSION = "ipsec-sentinel.dataset-ground-truth/v1"
 VERIFICATION_SCHEMA_VERSION = "ipsec-sentinel.dataset-verification/v1"
 TRAFFIC_SCHEMA_VERSION = "ipsec-sentinel.traffic/v1"
 SCENARIO_SCHEMA_VERSION = "ipsec-sentinel.scenario/v1"
-MANIFEST_SCHEMA_VERSION = 1
+MANIFEST_SCHEMA_VERSION = 2
 SEED_DERIVATION_VERSION = "sha256-slot-attempt/v1"
 PCAP_DERIVATION_VERSION = "pcap-workload-window-esp/v1"
 
@@ -85,6 +85,7 @@ class DatasetCaptureEvidence:
 class DatasetTrafficEvidence:
     traffic_class: str
     known_training_class: bool
+    class_role: str
     generator: str
     generator_version: str
     seed: int

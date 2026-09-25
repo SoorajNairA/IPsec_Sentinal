@@ -283,6 +283,12 @@ execution:
             self.assertLess(events.index("traffic_run"), events.index("pfs_rekey"))
             self.assertEqual(outcome.esp_packets, 12)
             run_dir = Path(directory) / "runs/run_000001"
+            truth = json.loads((run_dir / "ground_truth.json").read_text())
+            traffic = json.loads((run_dir / "traffic.json").read_text())
+            self.assertTrue(truth["traffic"]["known_training_class"])
+            self.assertEqual(truth["traffic"]["class_role"], "supervised")
+            self.assertEqual(traffic["known_training_class"], True)
+            self.assertEqual(traffic["class_role"], "supervised")
             encrypted = (run_dir / "encrypted.pcap").read_bytes()
             self.assertNotIn(b"ike", encrypted)
             self.assertNotIn(b"rekey", encrypted)

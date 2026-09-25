@@ -201,9 +201,15 @@ def build_terminal_payloads(
         tuple(checks),
         cleanup_actions,
     )
+    metadata = generator.metadata()
     traffic_payload = {
         "schema_version": TRAFFIC_SCHEMA_VERSION,
-        **generator.metadata(),
+        **metadata,
+        "class": plan.traffic_class,
+        "known_training_class": plan.known_training_class,
+        "class_role": plan.class_role,
+        "generator_version": plan.generator_version,
+        "seed": plan.seed,
         "validation": None if traffic_validation is None else asdict(traffic_validation),
     }
     payloads: dict[str, dict[str, object]] = {
@@ -221,7 +227,6 @@ def build_terminal_payloads(
         and session.sas
     ):
         sa = parse_sa(session.sas["gateway-a"])
-        metadata = generator.metadata()
         truth = DatasetGroundTruth(
             schema_version=DATASET_SCHEMA_VERSION,
             run_id=plan.attempt_id,
@@ -231,9 +236,10 @@ def build_terminal_payloads(
             training_ready=training_ready,
             traffic=DatasetTrafficEvidence(
                 plan.traffic_class,
-                True,
+                plan.known_training_class,
+                plan.class_role,
                 str(metadata["generator"]),
-                generator.version,
+                plan.generator_version,
                 plan.seed,
                 dict(metadata["parameters"]),
                 {} if traffic_result is None else dict(traffic_result.metrics),

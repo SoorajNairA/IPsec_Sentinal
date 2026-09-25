@@ -26,6 +26,10 @@ class DatasetSummary:
     total_duration_seconds: float
     created_at: str
     updated_at: str
+    supervised_ready_runs: int
+    ood_ready_runs: int
+    supervised_class_distribution: dict[str, int]
+    ood_class_distribution: dict[str, int]
 
     def to_dict(self) -> dict[str, object]:
         return asdict(self)
@@ -54,6 +58,26 @@ def build_summary(manifest: Manifest) -> DatasetSummary:
             "SELECT s.traffic_class,COUNT(*) AS count FROM slots s "
             "JOIN attempts a ON a.attempt_id=s.successful_attempt_id "
             "WHERE a.state='PASS' AND a.training_ready=1 "
+            "GROUP BY s.traffic_class ORDER BY s.traffic_class"
+        ).fetchall()
+    }
+    supervised_distribution = {
+        row["traffic_class"]: row["count"]
+        for row in connection.execute(
+            "SELECT s.traffic_class,COUNT(*) AS count FROM slots s "
+            "JOIN attempts a ON a.attempt_id=s.successful_attempt_id "
+            "WHERE a.state='PASS' AND a.training_ready=1 "
+            "AND s.known_training_class=1 AND s.class_role='supervised' "
+            "GROUP BY s.traffic_class ORDER BY s.traffic_class"
+        ).fetchall()
+    }
+    ood_distribution = {
+        row["traffic_class"]: row["count"]
+        for row in connection.execute(
+            "SELECT s.traffic_class,COUNT(*) AS count FROM slots s "
+            "JOIN attempts a ON a.attempt_id=s.successful_attempt_id "
+            "WHERE a.state='PASS' AND a.training_ready=1 "
+            "AND s.known_training_class=0 AND s.class_role='ood' "
             "GROUP BY s.traffic_class ORDER BY s.traffic_class"
         ).fetchall()
     }
@@ -92,6 +116,10 @@ def build_summary(manifest: Manifest) -> DatasetSummary:
         totals["duration"],
         dataset["created_at"],
         latest or dataset["updated_at"],
+        sum(supervised_distribution.values()),
+        sum(ood_distribution.values()),
+        supervised_distribution,
+        ood_distribution,
     )
 
 
@@ -107,6 +135,8 @@ def render_summary(summary: DatasetSummary) -> str:
         f"Failed runs: {summary.failed_runs}",
         f"Incomplete runs: {summary.incomplete_runs}",
         f"Training-ready runs: {summary.training_ready_runs}",
+        f"Supervised-ready runs: {summary.supervised_ready_runs}",
+        f"OOD-ready runs: {summary.ood_ready_runs}",
         "Class distribution:",
     ]
     lines.extend(f"  {name}: {count}" for name, count in summary.class_distribution.items())

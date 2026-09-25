@@ -36,6 +36,7 @@ def example_truth(
         traffic=DatasetTrafficEvidence(
             "video",
             True,
+            "supervised",
             "local-segmented-video",
             "1",
             7,
@@ -130,6 +131,8 @@ class DatasetModelTest(unittest.TestCase):
         self.assertEqual(payload["capture"]["full_evidence_file"], "full-evidence.pcap")
         self.assertEqual(payload["capture"]["ml_input_file"], "encrypted.pcap")
         self.assertTrue(payload["training_ready"])
+        self.assertTrue(payload["traffic"]["known_training_class"])
+        self.assertEqual(payload["traffic"]["class_role"], "supervised")
         self.assertEqual(json.loads(json.dumps(payload)), payload)
 
     def test_training_ready_requires_pass_and_successful_cleanup(self) -> None:

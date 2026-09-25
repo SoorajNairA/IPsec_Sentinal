@@ -20,6 +20,7 @@ from ipsec_sentinel.dataset.models import (
     CleanupState,
     RunState,
 )
+from ipsec_sentinel.traffic.base import is_supervised_eligible, traffic_spec
 
 
 class ManifestMismatch(ValueError):
@@ -37,6 +38,11 @@ class AttemptPlan:
     traffic_class: str
     network_profile: str
     artifact_path: str
+    known_training_class: bool = True
+    class_role: str = "supervised"
+    generator_version: str = "legacy-unknown/v1"
+    scenario_definition_digest: str = "legacy-secure-baseline/v1"
+    network_profile_version: str = "clean/v1"
 
 
 @dataclass(frozen=True)
@@ -49,6 +55,11 @@ class SlotRecord:
     repetition: int
     state: RunState
     successful_attempt_id: str | None
+    known_training_class: bool
+    class_role: str
+    generator_version: str
+    scenario_definition_digest: str
+    network_profile_version: str
 
 
 @dataclass(frozen=True)
@@ -78,7 +89,7 @@ class AttemptRecord:
 
 
 SCHEMA = """
-PRAGMA user_version = 1;
+PRAGMA user_version = 2;
 CREATE TABLE datasets (
     name TEXT PRIMARY KEY,
     schema_version TEXT NOT NULL,
@@ -96,6 +107,11 @@ CREATE TABLE slots (
     traffic_class TEXT NOT NULL,
     network_profile TEXT NOT NULL,
     repetition INTEGER NOT NULL,
+    known_training_class INTEGER NOT NULL CHECK (known_training_class IN (0,1)),
+    class_role TEXT NOT NULL CHECK (class_role IN ('supervised','ood')),
+    generator_version TEXT NOT NULL,
+    scenario_definition_digest TEXT NOT NULL,
+    network_profile_version TEXT NOT NULL,
     state TEXT NOT NULL CHECK (state IN ('PENDING','RUNNING','PASS','FAILED','INCOMPLETE')),
     successful_attempt_id TEXT,
     FOREIGN KEY(successful_attempt_id) REFERENCES attempts(attempt_id)
@@ -144,6 +160,47 @@ def _utc_now() -> str:
     return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def _migrate_v1_to_v2(connection: sqlite3.Connection) -> None:
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        connection.execute(
+            "ALTER TABLE slots ADD COLUMN known_training_class INTEGER NOT NULL "
+            "DEFAULT 1 CHECK (known_training_class IN (0,1))"
+        )
+        connection.execute(
+            "ALTER TABLE slots ADD COLUMN class_role TEXT NOT NULL "
+            "DEFAULT 'supervised' CHECK (class_role IN ('supervised','ood'))"
+        )
+        connection.execute(
+            "ALTER TABLE slots ADD COLUMN generator_version TEXT NOT NULL "
+            "DEFAULT 'legacy-unknown/v1'"
+        )
+        connection.execute(
+            "ALTER TABLE slots ADD COLUMN scenario_definition_digest TEXT NOT NULL "
+            "DEFAULT 'legacy-secure-baseline/v1'"
+        )
+        connection.execute(
+            "ALTER TABLE slots ADD COLUMN network_profile_version TEXT NOT NULL "
+            "DEFAULT 'clean/v1'"
+        )
+        dataset = connection.execute(
+            "SELECT generator_versions_json FROM datasets"
+        ).fetchone()
+        versions = {} if dataset is None else json.loads(dataset[0])
+        for row in connection.execute(
+            "SELECT slot_id,traffic_class FROM slots"
+        ).fetchall():
+            connection.execute(
+                "UPDATE slots SET generator_version=? WHERE slot_id=?",
+                (str(versions.get(row["traffic_class"], "legacy-unknown/v1")), row["slot_id"]),
+            )
+        connection.execute(f"PRAGMA user_version = {MANIFEST_SCHEMA_VERSION}")
+    except BaseException:
+        connection.rollback()
+        raise
+    connection.commit()
+
+
 class Manifest:
     def __init__(self, path: Path) -> None:
         self.path = path
@@ -154,6 +211,13 @@ class Manifest:
         self.connection.execute("PRAGMA foreign_keys = ON")
         self.connection.execute("PRAGMA busy_timeout = 5000")
         self.connection.execute("PRAGMA journal_mode = WAL")
+        version = self.connection.execute("PRAGMA user_version").fetchone()[0]
+        if version == 1:
+            try:
+                _migrate_v1_to_v2(self.connection)
+            except BaseException:
+                self.connection.close()
+                raise
 
     def close(self) -> None:
         self.connection.close()
@@ -206,8 +270,14 @@ class Manifest:
                 ),
             )
             for slot in slots:
+                spec = traffic_spec(slot.traffic_class)
+                class_role = "supervised" if spec.known_training_class else "ood"
                 self.connection.execute(
-                    "INSERT INTO slots VALUES(?,?,?,?,?,?,?,NULL)",
+                    "INSERT INTO slots("
+                    "slot_id,ordinal,scenario_id,traffic_class,network_profile,repetition,"
+                    "known_training_class,class_role,generator_version,"
+                    "scenario_definition_digest,network_profile_version,state,"
+                    "successful_attempt_id) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,NULL)",
                     (
                         slot.slot_id,
                         slot.ordinal,
@@ -215,6 +285,11 @@ class Manifest:
                         slot.traffic_class,
                         slot.network_profile,
                         slot.repetition,
+                        int(spec.known_training_class),
+                        class_role,
+                        generator_versions[slot.traffic_class],
+                        "legacy-secure-baseline/v1",
+                        "clean/v1",
                         RunState.PENDING.value,
                     ),
                 )
@@ -465,14 +540,16 @@ class Manifest:
         rows = self.connection.execute("SELECT * FROM slots ORDER BY ordinal").fetchall()
         return tuple(
             SlotRecord(
-                row["slot_id"],
-                row["ordinal"],
-                row["scenario_id"],
-                row["traffic_class"],
-                row["network_profile"],
-                row["repetition"],
-                RunState(row["state"]),
-                row["successful_attempt_id"],
+                slot_id=row["slot_id"], ordinal=row["ordinal"],
+                scenario_id=row["scenario_id"], traffic_class=row["traffic_class"],
+                network_profile=row["network_profile"], repetition=row["repetition"],
+                state=RunState(row["state"]),
+                successful_attempt_id=row["successful_attempt_id"],
+                known_training_class=bool(row["known_training_class"]),
+                class_role=row["class_role"],
+                generator_version=row["generator_version"],
+                scenario_definition_digest=row["scenario_definition_digest"],
+                network_profile_version=row["network_profile_version"],
             )
             for row in rows
         )
@@ -487,10 +564,25 @@ class Manifest:
         return tuple(self._attempt_record(row) for row in rows)
 
     def training_ready_attempts(self) -> tuple[AttemptRecord, ...]:
+        return self.quality_ready_attempts()
+
+    def quality_ready_attempts(self) -> tuple[AttemptRecord, ...]:
         return tuple(
             attempt
             for attempt in self.attempts()
             if attempt.state is RunState.PASS and attempt.training_ready
+        )
+
+    def supervised_ready_attempts(self) -> tuple[AttemptRecord, ...]:
+        slots = {slot.slot_id: slot for slot in self.slots()}
+        return tuple(
+            attempt
+            for attempt in self.quality_ready_attempts()
+            if slots[attempt.slot_id].class_role == "supervised"
+            and is_supervised_eligible(
+                slots[attempt.slot_id].traffic_class,
+                slots[attempt.slot_id].known_training_class,
+            )
         )
 
     def count_attempts(self, state: RunState) -> int:
@@ -509,15 +601,17 @@ class Manifest:
 
     def _attempt_plan(self, slot: sqlite3.Row, attempt: sqlite3.Row) -> AttemptPlan:
         return AttemptPlan(
-            attempt["attempt_id"],
-            slot["slot_id"],
-            slot["ordinal"],
-            attempt["attempt_number"],
-            attempt["seed"],
-            slot["scenario_id"],
-            slot["traffic_class"],
-            slot["network_profile"],
-            attempt["artifact_path"],
+            attempt_id=attempt["attempt_id"], slot_id=slot["slot_id"],
+            ordinal=slot["ordinal"], attempt_number=attempt["attempt_number"],
+            seed=attempt["seed"], scenario_id=slot["scenario_id"],
+            traffic_class=slot["traffic_class"],
+            network_profile=slot["network_profile"],
+            artifact_path=attempt["artifact_path"],
+            known_training_class=bool(slot["known_training_class"]),
+            class_role=slot["class_role"],
+            generator_version=slot["generator_version"],
+            scenario_definition_digest=slot["scenario_definition_digest"],
+            network_profile_version=slot["network_profile_version"],
         )
 
     def _attempt_record(self, row: sqlite3.Row) -> AttemptRecord:
