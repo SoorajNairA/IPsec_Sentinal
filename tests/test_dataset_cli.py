@@ -23,7 +23,8 @@ class DatasetCliTest(unittest.TestCase):
             code = main(["list-traffic"])
         self.assertEqual(code, 0)
         self.assertEqual(
-            output.getvalue().splitlines(), ["icmp", "video", "voip", "web"]
+            output.getvalue().splitlines(),
+            ["email", "icmp", "video", "voip", "web"],
         )
 
     def test_generate_passes_resume_to_orchestrator(self) -> None:
