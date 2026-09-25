@@ -27,6 +27,7 @@ def write_one_slot_config(
     traffic_class: str,
     seed: int,
     retry_failed: int = 0,
+    scenario: str = "secure-baseline",
 ) -> Path:
     path = root / f"{dataset_name}.yaml"
     path.write_text(
@@ -37,7 +38,7 @@ def write_one_slot_config(
 traffic:
   classes: [{traffic_class}]
 ipsec:
-  scenarios: [secure-baseline]
+  scenarios: [{scenario}]
 network_profiles: [clean]
 runs_per_combination: 1
 execution:
@@ -143,16 +144,19 @@ class DatasetIntegrationTest(unittest.TestCase):
             )
             self.assertNotEqual(before, after)
         pfs = truth["ipsec"]["observed"]["pfs"]
-        self.assertEqual(pfs["status"], "VERIFIED")
+        pfs_enabled = truth["ipsec"]["configured"]["pfs"]
+        self.assertEqual(
+            pfs["status"], "VERIFIED" if pfs_enabled else "VERIFIED_DISABLED"
+        )
         self.assertTrue(pfs["rekey_observed"])
-        self.assertIn("fresh_dh_selected=True", pfs["evidence"])
+        self.assertIn("expected_rekey_proposal_selected=True", pfs["evidence"])
 
     def run_class(
-        self, traffic_class: str, seed: int
+        self, traffic_class: str, seed: int, scenario: str = "secure-baseline"
     ) -> tuple[Path, dict[str, object]]:
         dataset_name = f"integration-{traffic_class.replace('_', '-')}-{seed}"
         config = write_one_slot_config(
-            self.root, dataset_name, traffic_class, seed
+            self.root, dataset_name, traffic_class, seed, scenario=scenario
         )
         summary = generate_dataset(config, self.root / "dataset")
         self.assertEqual(summary.successful_runs, 1, summary)
@@ -178,6 +182,17 @@ class DatasetIntegrationTest(unittest.TestCase):
         self.assert_capture_roles(run_dir, truth)
         assert_no_lab_resources(run_dir.name)
         return run_dir, truth
+
+    def test_real_icmp_each_additional_ipsec_scenario(self) -> None:
+        for offset, scenario in enumerate(
+            ("aes128-gcm", "aes256-cbc", "no-pfs"), start=1
+        ):
+            with self.subTest(scenario=scenario):
+                run_dir, truth = self.run_class(
+                    "icmp", 8000 + offset, scenario=scenario
+                )
+                self.assertEqual(truth["ipsec"]["scenario_id"], scenario)
+                self.assertTrue((run_dir / "xfrm-gateway-a.txt").is_file())
 
     def test_real_icmp_dataset_run(self) -> None:
         self.run_class("icmp", 1001)

@@ -8,6 +8,7 @@ from ipsec_sentinel.dataset.config import DatasetConfig
 from ipsec_sentinel.dataset.models import SEED_DERIVATION_VERSION
 from ipsec_sentinel.traffic import register_builtin_generators
 from ipsec_sentinel.traffic.base import is_supervised_eligible, traffic_spec
+from ipsec_sentinel.scenario import scenario_digest
 
 
 @dataclass(frozen=True)
@@ -82,6 +83,9 @@ def matrix_fingerprint(
         },
         "traffic_classes": list(config.traffic_classes),
         "scenarios": list(config.scenarios),
+        "scenario_definitions": [
+            [name, scenario_digest(name)] for name in config.scenarios
+        ],
         "network_profiles": list(config.network_profiles),
         "runs_per_combination": config.runs_per_combination,
         "evaluation_ood_classes": list(config.evaluation_ood_classes),

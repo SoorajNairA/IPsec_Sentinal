@@ -3,7 +3,7 @@ from io import StringIO
 from types import SimpleNamespace
 import unittest
 
-from ipsec_sentinel.dataset.cli import main
+from ipsec_sentinel.dataset.cli import build_parser, main
 
 
 def passing_summary():
@@ -57,6 +57,20 @@ class DatasetCliTest(unittest.TestCase):
     def test_invalid_traffic_choice_fails_parser(self) -> None:
         with self.assertRaises(SystemExit):
             main(["run", "--traffic", "dns"])
+
+    def test_run_parser_accepts_every_supervised_class_and_allowlisted_scenario(self) -> None:
+        parser = build_parser()
+        for traffic in (
+            "icmp", "web", "video", "voip", "email", "messaging",
+            "file_transfer",
+        ):
+            for scenario in (
+                "secure-baseline", "aes128-gcm", "aes256-cbc", "no-pfs"
+            ):
+                args = parser.parse_args(
+                    ["run", "--traffic", traffic, "--scenario", scenario]
+                )
+                self.assertEqual((args.traffic, args.scenario), (traffic, scenario))
 
 
 if __name__ == "__main__":

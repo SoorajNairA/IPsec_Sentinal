@@ -36,6 +36,28 @@ class DatasetConfigTest(unittest.TestCase):
         self.assertEqual(config.evaluation_ood_classes, ())
         self.assertEqual(config.evaluation_runs_per_combination, 0)
 
+    def test_loads_four_scenario_prototype_contract(self) -> None:
+        config = self.load(
+            VALID.replace(
+                "[icmp, web, video]",
+                "[icmp, web, video, voip, email, messaging, file_transfer]",
+            ).replace(
+                "[secure-baseline]",
+                "[secure-baseline, aes128-gcm, aes256-cbc, no-pfs]",
+            ).replace("runs_per_combination: 3", "runs_per_combination: 6")
+        )
+
+        self.assertEqual(
+            config.scenarios,
+            ("secure-baseline", "aes128-gcm", "aes256-cbc", "no-pfs"),
+        )
+        self.assertEqual(len(config.traffic_classes), 7)
+        self.assertEqual(config.runs_per_combination, 6)
+
+    def test_rejects_scenarios_outside_the_allowlist(self) -> None:
+        with self.assertRaisesRegex(DatasetConfigError, "IPsec scenario"):
+            self.load(VALID.replace("secure-baseline", "experimental"))
+
     def test_loads_separate_ood_evaluation_selection(self) -> None:
         config = self.load(
             VALID.replace(

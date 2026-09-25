@@ -8,6 +8,7 @@ from typing import Any
 import yaml
 
 from ipsec_sentinel.dataset.models import DATASET_SCHEMA_VERSION
+from ipsec_sentinel.scenario import SUPPORTED_SCENARIOS
 from ipsec_sentinel.traffic.base import (
     OOD_CLASS_ALLOWLIST,
     SUPERVISED_CLASS_ALLOWLIST,
@@ -172,6 +173,9 @@ class DatasetConfig:
             raise DatasetConfigError("workers must be 1 in Phase 2")
         if config.network_profiles != ("clean",):
             raise DatasetConfigError("unsupported network profile")
-        if config.scenarios != ("secure-baseline",):
-            raise DatasetConfigError("unsupported IPsec scenario")
+        unsupported_scenarios = set(config.scenarios) - set(SUPPORTED_SCENARIOS)
+        if unsupported_scenarios:
+            raise DatasetConfigError(
+                f"unsupported IPsec scenario: {sorted(unsupported_scenarios)[0]}"
+            )
         return config

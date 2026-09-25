@@ -8,6 +8,7 @@ from ipsec_sentinel.dataset.matrix import (
     expand_matrix,
     matrix_fingerprint,
 )
+from ipsec_sentinel.scenario import scenario_digest
 
 
 class MatrixTest(unittest.TestCase):
@@ -52,6 +53,32 @@ class MatrixTest(unittest.TestCase):
         self.assertNotEqual(
             original,
             matrix_fingerprint(self.config, {**self.versions, "web": "2"}),
+        )
+
+    def test_prototype_expands_168_slots_and_fingerprints_scenario_files(self) -> None:
+        classes = (
+            "icmp", "web", "video", "voip", "email", "messaging",
+            "file_transfer",
+        )
+        scenarios = ("secure-baseline", "aes128-gcm", "aes256-cbc", "no-pfs")
+        config = replace(
+            self.config,
+            traffic_classes=classes,
+            scenarios=scenarios,
+            runs_per_combination=6,
+        )
+        versions = {name: "1" for name in classes}
+
+        slots = expand_matrix(config, versions)
+
+        self.assertEqual(len(slots), 168)
+        self.assertEqual(slots[0].scenario_id, "secure-baseline")
+        self.assertEqual(slots[42].scenario_id, "aes128-gcm")
+        self.assertEqual(slots[-1].scenario_id, "no-pfs")
+        self.assertRegex(scenario_digest("aes256-cbc"), r"^[0-9a-f]{64}$")
+        self.assertNotEqual(
+            matrix_fingerprint(config, versions),
+            matrix_fingerprint(replace(config, scenarios=scenarios[::-1]), versions),
         )
 
 

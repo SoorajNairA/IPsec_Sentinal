@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -74,6 +75,10 @@ def scenario_path(scenario_id: str) -> Path:
     if scenario_id not in SUPPORTED_SCENARIOS:
         raise ScenarioError(f"unsupported scenario: {scenario_id}")
     return Path(__file__).resolve().parent.parent / "scenarios" / f"{scenario_id}.yaml"
+
+
+def scenario_digest(scenario_id: str) -> str:
+    return hashlib.sha256(scenario_path(scenario_id).read_bytes()).hexdigest()
 
 
 def negotiated_policy(scenario: "Scenario | str") -> NegotiatedPolicy:

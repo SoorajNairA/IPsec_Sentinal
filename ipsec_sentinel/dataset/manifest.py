@@ -21,6 +21,7 @@ from ipsec_sentinel.dataset.models import (
     RunState,
 )
 from ipsec_sentinel.traffic.base import is_supervised_eligible, traffic_spec
+from ipsec_sentinel.scenario import scenario_digest
 
 
 class ManifestMismatch(ValueError):
@@ -288,7 +289,7 @@ class Manifest:
                         int(spec.known_training_class),
                         class_role,
                         generator_versions[slot.traffic_class],
-                        "legacy-secure-baseline/v1",
+                        scenario_digest(slot.scenario_id),
                         "clean/v1",
                         RunState.PENDING.value,
                     ),

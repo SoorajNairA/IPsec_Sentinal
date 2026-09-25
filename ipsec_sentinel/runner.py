@@ -111,6 +111,8 @@ def run_secure_baseline(
         context["ping"] = result.stdout
 
     def verdict() -> None:
+        loaded = session.scenario
+        assert loaded is not None
         verification = evaluate_baseline(
             session.sas,
             session.xfrm,
@@ -124,8 +126,6 @@ def run_secure_baseline(
         if verification.status != "PASS":
             failed = [check.name for check in verification.checks if not check.passed]
             raise RuntimeError(f"evidence verdict failed: {', '.join(failed)}")
-        loaded = session.scenario
-        assert loaded is not None
         sa = parse_sa(session.sas["gateway-a"])
         context["ground_truth"] = GroundTruth(
             run_id=run_id,

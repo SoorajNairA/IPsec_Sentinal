@@ -14,6 +14,7 @@ from ipsec_sentinel.dataset.validation import (
 )
 from ipsec_sentinel.traffic import register_builtin_generators
 from ipsec_sentinel.traffic.base import traffic_classes
+from ipsec_sentinel.scenario import SUPPORTED_SCENARIOS
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -21,9 +22,12 @@ def build_parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
     subparsers.add_parser("list-traffic")
     run = subparsers.add_parser("run")
-    run.add_argument("--traffic", required=True, choices=("icmp", "web", "video"))
     run.add_argument(
-        "--scenario", default="secure-baseline", choices=("secure-baseline",)
+        "--traffic", required=True,
+        choices=("icmp", "web", "video", "voip", "email", "messaging", "file_transfer"),
+    )
+    run.add_argument(
+        "--scenario", default="secure-baseline", choices=SUPPORTED_SCENARIOS
     )
     run.add_argument("--seed", type=int)
     run.add_argument("--output", type=Path, default=Path("dataset/ad-hoc"))
