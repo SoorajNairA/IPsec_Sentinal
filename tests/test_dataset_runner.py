@@ -15,6 +15,7 @@ from ipsec_sentinel.dataset.runner import (
     classify_failure,
     finalize_attempt_state,
     generate_dataset,
+    minimum_esp_packets,
     run_dataset_attempt,
 )
 from ipsec_sentinel.models import CaptureEvidence, PfsObservation
@@ -220,6 +221,12 @@ execution:
         self.assertEqual(
             classify_failure("pcap_derive", ValueError("pcap")),
             "pcap_derivation_failed",
+        )
+
+    def test_messaging_esp_floor_does_not_assume_one_ack_per_message(self) -> None:
+        self.assertEqual(
+            minimum_esp_packets("messaging", {"expected_messages_total": 22}),
+            22,
         )
 
     def test_cleanup_failure_excludes_otherwise_valid_data(self) -> None:

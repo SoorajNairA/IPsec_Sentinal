@@ -6,6 +6,7 @@ from ipsec_sentinel.traffic.base import register_generator, traffic_classes
 def register_builtin_generators() -> None:
     from ipsec_sentinel.traffic.email import EmailGenerator
     from ipsec_sentinel.traffic.icmp import IcmpGenerator
+    from ipsec_sentinel.traffic.messaging import MessagingGenerator
     from ipsec_sentinel.traffic.video import VideoGenerator
     from ipsec_sentinel.traffic.voip import VoipGenerator
     from ipsec_sentinel.traffic.web import WebGenerator
@@ -20,6 +21,11 @@ def register_builtin_generators() -> None:
         register_generator(
             "icmp", IcmpGenerator, known_training_class=True,
             version=IcmpGenerator.version,
+        )
+    if "messaging" not in registered:
+        register_generator(
+            "messaging", MessagingGenerator, known_training_class=True,
+            version=MessagingGenerator.version,
         )
     if "web" not in registered:
         register_generator(

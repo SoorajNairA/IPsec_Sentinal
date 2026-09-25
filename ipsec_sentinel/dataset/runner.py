@@ -150,6 +150,8 @@ def minimum_esp_packets(traffic_class: str, parameters: dict[str, object]) -> in
         return max(20, int(parameters["expected_packets_total"]) // 2)
     if traffic_class == "email":
         return max(20, 4 * len(parameters["messages"]))  # type: ignore[arg-type]
+    if traffic_class == "messaging":
+        return max(20, int(parameters["expected_messages_total"]))
     raise ValueError(f"unsupported traffic class: {traffic_class}")
 
 
