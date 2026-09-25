@@ -33,6 +33,45 @@ class DatasetConfigTest(unittest.TestCase):
         self.assertEqual(config.traffic_classes, ("icmp", "web", "video"))
         self.assertEqual(config.runs_per_combination, 3)
         self.assertEqual(config.workers, 1)
+        self.assertEqual(config.evaluation_ood_classes, ())
+        self.assertEqual(config.evaluation_runs_per_combination, 0)
+
+    def test_loads_separate_ood_evaluation_selection(self) -> None:
+        config = self.load(
+            VALID.replace(
+                "execution:\n",
+                "evaluation:\n"
+                "  ood_classes: [remote_desktop_like, database_query_like]\n"
+                "  runs_per_combination: 2\n"
+                "execution:\n",
+            )
+        )
+        self.assertEqual(
+            config.evaluation_ood_classes,
+            ("remote_desktop_like", "database_query_like"),
+        )
+        self.assertEqual(config.evaluation_runs_per_combination, 2)
+
+    def test_rejects_mixed_or_unknown_class_roles(self) -> None:
+        cases = (
+            (VALID.replace("icmp, web, video", "icmp, remote_desktop_like"), "OOD"),
+            (
+                VALID.replace(
+                    "execution:\n",
+                    "evaluation:\n"
+                    "  ood_classes: [web]\n"
+                    "  runs_per_combination: 1\n"
+                    "execution:\n",
+                ),
+                "supervised",
+            ),
+            (VALID.replace("icmp, web, video", "icmp, dns"), "unknown"),
+        )
+        for text, message in cases:
+            with self.subTest(message=message), self.assertRaisesRegex(
+                DatasetConfigError, message
+            ):
+                self.load(text)
 
     def test_rejects_unknown_fields_parallelism_and_unsupported_profiles(self) -> None:
         for text, message in (

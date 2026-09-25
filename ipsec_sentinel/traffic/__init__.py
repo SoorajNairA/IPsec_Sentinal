@@ -10,8 +10,17 @@ def register_builtin_generators() -> None:
 
     registered = set(traffic_classes())
     if "icmp" not in registered:
-        register_generator("icmp", IcmpGenerator)
+        register_generator(
+            "icmp", IcmpGenerator, known_training_class=True,
+            version=IcmpGenerator.version,
+        )
     if "web" not in registered:
-        register_generator("web", WebGenerator)
+        register_generator(
+            "web", WebGenerator, known_training_class=True,
+            version=WebGenerator.version,
+        )
     if "video" not in registered:
-        register_generator("video", VideoGenerator)
+        register_generator(
+            "video", VideoGenerator, known_training_class=True,
+            version=VideoGenerator.version,
+        )

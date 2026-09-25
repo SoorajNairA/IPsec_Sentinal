@@ -22,6 +22,8 @@ class MatrixTest(unittest.TestCase):
             runs_per_combination=3,
             workers=1,
             retry_failed=1,
+            evaluation_ood_classes=(),
+            evaluation_runs_per_combination=0,
         )
         self.versions = {"icmp": "1", "web": "1", "video": "1"}
 

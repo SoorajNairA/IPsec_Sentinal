@@ -6,6 +6,8 @@ import json
 
 from ipsec_sentinel.dataset.config import DatasetConfig
 from ipsec_sentinel.dataset.models import SEED_DERIVATION_VERSION
+from ipsec_sentinel.traffic import register_builtin_generators
+from ipsec_sentinel.traffic.base import is_supervised_eligible, traffic_spec
 
 
 @dataclass(frozen=True)
@@ -21,9 +23,14 @@ class MatrixSlot:
 def expand_matrix(
     config: DatasetConfig, generator_versions: dict[str, str]
 ) -> tuple[MatrixSlot, ...]:
+    register_builtin_generators()
     unknown = set(config.traffic_classes) - set(generator_versions)
     if unknown:
         raise ValueError(f"unregistered traffic class: {sorted(unknown)[0]}")
+    for name in config.traffic_classes:
+        spec = traffic_spec(name)
+        if not is_supervised_eligible(name, spec.known_training_class):
+            raise ValueError(f"traffic class is not supervised-eligible: {name}")
     slots: list[MatrixSlot] = []
     ordinal = 0
     for scenario_id in config.scenarios:
@@ -77,6 +84,8 @@ def matrix_fingerprint(
         "scenarios": list(config.scenarios),
         "network_profiles": list(config.network_profiles),
         "runs_per_combination": config.runs_per_combination,
+        "evaluation_ood_classes": list(config.evaluation_ood_classes),
+        "evaluation_runs_per_combination": config.evaluation_runs_per_combination,
         "workers": config.workers,
         "retry_failed": config.retry_failed,
         "generator_versions": [
