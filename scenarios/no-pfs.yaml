@@ -1,0 +1,19 @@
+id: no-pfs
+
+ipsec:
+  ike_version: 2
+  mode: tunnel
+  ike_proposal: aes256gcm16-prfsha384-ecp384
+  esp_proposal: aes256gcm16
+  local_subnet: 10.10.0.0/24
+  remote_subnet: 10.20.0.0/24
+  transit_subnet: 192.0.2.0/30
+  pfs: false
+  ip_version: 4
+
+traffic:
+  type: icmp
+  count: 5
+
+capture:
+  enabled: true

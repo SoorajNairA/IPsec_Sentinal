@@ -13,13 +13,15 @@ from tests.pcap_helpers import ethernet_ipv4, write_pcap
 
 
 class OfflineValidationTest(unittest.TestCase):
-    def build_dataset(self, *, passed: bool = True) -> tuple[TemporaryDirectory, Path]:
+    def build_dataset(
+        self, *, passed: bool = True, scenario_id: str = "secure-baseline"
+    ) -> tuple[TemporaryDirectory, Path]:
         temporary = TemporaryDirectory()
         root = Path(temporary.name)
         manifest = Manifest(root / "manifest.sqlite3")
         config = DatasetConfig(
             "test", "ipsec-sentinel.dataset-ground-truth/v1", 7, ("icmp",),
-            ("secure-baseline",), ("clean",), 1, 1, 0,
+            (scenario_id,), ("clean",), 1, 1, 0,
         )
         manifest.initialize(config, "f" * 64, "matrix.yaml", {"icmp": "1"})
         plan = manifest.next_attempt("run_000001", 0)
@@ -58,9 +60,16 @@ class OfflineValidationTest(unittest.TestCase):
                     "ml_esp_packets": 2, "ml_capture_bytes": 126,
                     "ike_packets": 1, "esp_packets": 2,
                 },
-                "ipsec": {"observed": {"pfs": {
-                    "status": "VERIFIED", "rekey_observed": True,
-                }}},
+                "ipsec": {
+                    "configured": {"pfs": scenario_id != "no-pfs"},
+                    "observed": {"pfs": {
+                        "status": (
+                            "VERIFIED" if scenario_id != "no-pfs"
+                            else "VERIFIED_DISABLED"
+                        ),
+                        "rekey_observed": True,
+                    }},
+                },
             }
             for name, payload in {
                 "ground_truth.json": truth,
@@ -95,6 +104,14 @@ class OfflineValidationTest(unittest.TestCase):
         report = validate_dataset(root)
         self.assertTrue(report.passed, report.errors)
         self.assertEqual(report.valid_runs, 1)
+
+    def test_accepts_verified_disabled_pfs_for_no_pfs_policy(self) -> None:
+        temporary, root = self.build_dataset(scenario_id="no-pfs")
+        self.addCleanup(temporary.cleanup)
+
+        report = validate_dataset(root)
+
+        self.assertTrue(report.passed, report.errors)
 
     def test_rejects_missing_ml_pcap(self) -> None:
         temporary, root = self.build_dataset()

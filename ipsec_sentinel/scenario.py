@@ -11,6 +11,79 @@ class ScenarioError(ValueError):
     """Raised when a scenario is outside the supported Phase 1 contract."""
 
 
+SUPPORTED_SCENARIOS = (
+    "secure-baseline",
+    "aes128-gcm",
+    "aes256-cbc",
+    "no-pfs",
+)
+
+
+@dataclass(frozen=True)
+class NegotiatedPolicy:
+    ike_encryption: str
+    ike_integrity: str
+    ike_prf: str
+    ike_dh_group: str
+    esp_encryption: str
+    esp_integrity: str
+    child_dh_group: str | None
+
+
+_POLICIES = {
+    "secure-baseline": (
+        "aes256gcm16-prfsha384-ecp384",
+        "aes256gcm16-ecp384",
+        True,
+        NegotiatedPolicy(
+            "AES_GCM_16_256", "", "PRF_HMAC_SHA2_384", "ECP_384",
+            "AES_GCM_16_256", "", "ECP_384",
+        ),
+    ),
+    "aes128-gcm": (
+        "aes128gcm16-prfsha384-ecp384",
+        "aes128gcm16-ecp384",
+        True,
+        NegotiatedPolicy(
+            "AES_GCM_16_128", "", "PRF_HMAC_SHA2_384", "ECP_384",
+            "AES_GCM_16_128", "", "ECP_384",
+        ),
+    ),
+    "aes256-cbc": (
+        "aes256-sha256-prfsha256-ecp384",
+        "aes256-sha256-ecp384",
+        True,
+        NegotiatedPolicy(
+            "AES_CBC_256", "HMAC_SHA2_256_128", "PRF_HMAC_SHA2_256", "ECP_384",
+            "AES_CBC_256", "HMAC_SHA2_256_128", "ECP_384",
+        ),
+    ),
+    "no-pfs": (
+        "aes256gcm16-prfsha384-ecp384",
+        "aes256gcm16",
+        False,
+        NegotiatedPolicy(
+            "AES_GCM_16_256", "", "PRF_HMAC_SHA2_384", "ECP_384",
+            "AES_GCM_16_256", "", None,
+        ),
+    ),
+}
+
+
+def scenario_path(scenario_id: str) -> Path:
+    if scenario_id not in SUPPORTED_SCENARIOS:
+        raise ScenarioError(f"unsupported scenario: {scenario_id}")
+    return Path(__file__).resolve().parent.parent / "scenarios" / f"{scenario_id}.yaml"
+
+
+def negotiated_policy(scenario: "Scenario | str") -> NegotiatedPolicy:
+    scenario_id = scenario.id if isinstance(scenario, Scenario) else scenario
+    try:
+        return _POLICIES[scenario_id][3]
+    except KeyError as error:
+        raise ScenarioError(f"unsupported scenario: {scenario_id}") from error
+
+
 @dataclass(frozen=True)
 class IpsecConfig:
     ike_version: int
@@ -73,19 +146,23 @@ class Scenario:
         _require_keys(traffic, {"type", "count"}, "traffic")
         _require_keys(capture, {"enabled"}, "capture")
 
+        scenario_id = root["id"]
+        if not isinstance(scenario_id, str) or scenario_id not in SUPPORTED_SCENARIOS:
+            raise ScenarioError(f"id: unsupported scenario {scenario_id!r}")
+        ike_proposal, esp_proposal, pfs, _ = _POLICIES[scenario_id]
         expected = {
-            "id": (root["id"], "secure-baseline"),
+            "id": (root["id"], scenario_id),
             "ike_version": (ipsec["ike_version"], 2),
             "mode": (ipsec["mode"], "tunnel"),
             "ike_proposal": (
                 ipsec["ike_proposal"],
-                "aes256gcm16-prfsha384-ecp384",
+                ike_proposal,
             ),
-            "esp_proposal": (ipsec["esp_proposal"], "aes256gcm16-ecp384"),
+            "esp_proposal": (ipsec["esp_proposal"], esp_proposal),
             "local_subnet": (ipsec["local_subnet"], "10.10.0.0/24"),
             "remote_subnet": (ipsec["remote_subnet"], "10.20.0.0/24"),
             "transit_subnet": (ipsec["transit_subnet"], "192.0.2.0/30"),
-            "pfs": (ipsec["pfs"], True),
+            "pfs": (ipsec["pfs"], pfs),
             "ip_version": (ipsec["ip_version"], 4),
             "traffic.type": (traffic["type"], "icmp"),
             "traffic.count": (traffic["count"], 5),

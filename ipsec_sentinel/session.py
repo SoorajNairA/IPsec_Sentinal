@@ -18,7 +18,7 @@ from ipsec_sentinel.capture import (
 from ipsec_sentinel.command import run_checked
 from ipsec_sentinel.evidence import evaluate_pfs, parse_sa
 from ipsec_sentinel.models import CaptureEvidence, PfsObservation
-from ipsec_sentinel.scenario import Scenario
+from ipsec_sentinel.scenario import Scenario, negotiated_policy, scenario_path
 from ipsec_sentinel.strongswan import RekeyEvidence, StrongSwanPair
 from ipsec_sentinel.topology import Topology
 
@@ -123,10 +123,8 @@ class SecureSession:
     def load_scenario(self, scenario: str | Path) -> Scenario:
         if isinstance(scenario, Path):
             path = scenario
-        elif scenario == "secure-baseline":
-            path = Path("scenarios/secure-baseline.yaml")
         else:
-            raise ValueError(f"unsupported scenario: {scenario}")
+            path = scenario_path(scenario)
         self.scenario_yaml = path.read_text(encoding="utf-8")
         self.scenario = Scenario.load(path)
         return self.scenario
@@ -139,7 +137,9 @@ class SecureSession:
             raise RuntimeError(f"topology readback failed: {', '.join(failures)}")
 
     def start_daemons(self) -> None:
-        self.pair.start(self.run_dir)
+        if self.scenario is None:
+            raise RuntimeError("scenario must be loaded before daemon start")
+        self.pair.start(self.run_dir, scenario=self.scenario)
 
     def start_captures(self) -> None:
         self.runtime_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
@@ -186,13 +186,22 @@ class SecureSession:
         return self.xfrm
 
     def rekey(self) -> PfsObservation:
+        if self.scenario is None:
+            raise RuntimeError("scenario must be loaded before rekey")
         self.rekey_evidence = self.pair.rekey()
+        policy = negotiated_policy(self.scenario)
+        child_proposal = "/".join(
+            value for value in (policy.esp_encryption, policy.esp_integrity) if value
+        )
         self.pfs = evaluate_pfs(
             self.rekey_evidence.before_sas,
             self.rekey_evidence.after_sas,
             self.rekey_evidence.log_segment,
             attempted=self.rekey_evidence.attempted,
             completed=self.rekey_evidence.completed,
+            pfs_required=self.scenario.ipsec.pfs,
+            expected_child_proposal=child_proposal,
+            expected_dh_group=policy.child_dh_group,
         )
         return self.pfs
 

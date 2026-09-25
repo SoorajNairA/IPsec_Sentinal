@@ -351,7 +351,9 @@ def run_dataset_attempt(
         execute("initiate", session.initiate)
         sas = execute("sa_wait", session.wait_for_sa)
         xfrm = execute("xfrm_collection", session.collect_xfrm)
-        tunnel = evaluate_tunnel(sas, xfrm, run_id=plan.attempt_id)  # type: ignore[arg-type]
+        tunnel = evaluate_tunnel(  # type: ignore[arg-type]
+            sas, xfrm, run_id=plan.attempt_id, scenario=scenario
+        )
         if tunnel.status != "PASS":
             raise RuntimeError("tunnel SA/XFRM evidence failed")
 
@@ -389,6 +391,7 @@ def run_dataset_attempt(
             full_capture,  # type: ignore[arg-type]
             run_id=plan.attempt_id,
             pfs=pfs,  # type: ignore[arg-type]
+            scenario=scenario,
         )
         ipsec_verified = ipsec_verification.status == "PASS"
         if not ipsec_verified:

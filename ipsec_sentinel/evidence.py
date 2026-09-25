@@ -11,6 +11,7 @@ from ipsec_sentinel.models import (
     TrafficEvidence,
     Verification,
 )
+from ipsec_sentinel.scenario import NegotiatedPolicy, Scenario, negotiated_policy
 
 
 @dataclass(frozen=True)
@@ -24,6 +25,8 @@ class SaEvidence:
     local_ts: str
     remote_ts: str
     spis: tuple[str, str]
+    ike_integrity: str = ""
+    esp_integrity: str = ""
 
 
 @dataclass(frozen=True)
@@ -43,6 +46,8 @@ class XfrmState:
     mode: str
     direction: str
     aes_gcm: bool
+    aes_cbc: bool
+    hmac_sha256: bool
 
 
 @dataclass(frozen=True)
@@ -66,18 +71,22 @@ def parse_sa(text: str) -> SaEvidence:
     return SaEvidence(
         ike_state=_field(text, "state"),
         child_state=_field(child, "state"),
-        ike_proposal=(
-            f"{_field(text, 'encr-alg')}_{_field(text, 'encr-keysize')}"
-            f"/{_field(text, 'prf-alg')}/{_field(text, 'dh-group')}"
+        ike_proposal=_proposal(
+            _field(text, "encr-alg"), _field(text, "encr-keysize"),
+            _field(text, "integ-alg"), _field(text, "prf-alg"),
+            _field(text, "dh-group"),
         ),
-        esp_proposal=(
-            f"{_field(child, 'encr-alg')}_{_field(child, 'encr-keysize')}"
+        esp_proposal=_proposal(
+            _field(child, "encr-alg"), _field(child, "encr-keysize"),
+            _field(child, "integ-alg"),
         ),
         local_id=_field(text, "local-id"),
         remote_id=_field(text, "remote-id"),
         local_ts=_bracket_field(child, "local-ts"),
         remote_ts=_bracket_field(child, "remote-ts"),
         spis=(_field(child, "spi-in"), _field(child, "spi-out")),
+        ike_integrity=_field(text, "integ-alg"),
+        esp_integrity=_field(child, "integ-alg"),
     )
 
 
@@ -85,6 +94,7 @@ def parse_xfrm(
     text: str,
     gateway: str | None = None,
     sa: SaEvidence | None = None,
+    policy: NegotiatedPolicy | None = None,
 ) -> XfrmEvidence:
     state_text, marker, policy_text = text.partition("POLICY")
     if not marker:
@@ -101,8 +111,8 @@ def parse_xfrm(
     spi_in, spi_out = sa.spis if sa is not None else (None, None)
     state_valid = all(
         (
-            _has_state(states, outer_local, outer_remote, "out", spi_out),
-            _has_state(states, outer_remote, outer_local, "in", spi_in),
+            _has_state(states, outer_local, outer_remote, "out", spi_out, policy),
+            _has_state(states, outer_remote, outer_local, "in", spi_in, policy),
         )
     )
     policy_valid = all(
@@ -138,6 +148,9 @@ def evaluate_pfs(
     *,
     attempted: bool,
     completed: bool = True,
+    pfs_required: bool = True,
+    expected_child_proposal: str = "AES_GCM_16_256",
+    expected_dh_group: str | None = "ECP_384",
 ) -> PfsObservation:
     if not attempted:
         return PfsObservation.not_tested()
@@ -153,25 +166,41 @@ def evaluate_pfs(
     present = all(before_a + before_b + after_a + after_b)
     reciprocal = before_a == tuple(reversed(before_b)) and after_a == tuple(reversed(after_b))
     changed = all(old != new for old, new in zip(before_a + before_b, after_a + after_b))
-    selected = "selected proposal: ESP:AES_GCM_16_256/ECP_384/NO_EXT_SEQ"
-    fresh_dh = selected in log_segment
-    verified = completed and present and reciprocal and changed and fresh_dh
-    status = "VERIFIED" if verified else "NOT_VERIFIED"
+    suffix = f"/{expected_dh_group}" if pfs_required and expected_dh_group else ""
+    selected = (
+        f"selected proposal: ESP:{expected_child_proposal}{suffix}/NO_EXT_SEQ"
+    )
+    selected_match = selected in log_segment
+    proposal_lines = re.findall(r"selected proposal: ESP:([^\r\n]+)", log_segment)
+    unexpected_dh = any("/ECP_" in line for line in proposal_lines)
+    crypto_verified = selected_match and (pfs_required or not unexpected_dh)
+    verified = completed and present and reciprocal and changed and crypto_verified
+    if verified:
+        status = "VERIFIED" if pfs_required else "VERIFIED_DISABLED"
+    else:
+        status = "NOT_VERIFIED"
     evidence = tuple(
         changes
         + [
             f"rekey_completed={completed}",
             f"reciprocal_spis={reciprocal}",
             f"both_directions_changed={changed}",
-            f"fresh_dh_selected={fresh_dh}",
-            selected if fresh_dh else "fresh DH selection missing",
+            f"pfs_configured={pfs_required}",
+            f"expected_rekey_proposal_selected={selected_match}",
+            f"unexpected_child_dh={unexpected_dh}",
+            selected if selected_match else "expected CHILD rekey proposal missing",
         ]
     )
     return PfsObservation(status=status, rekey_observed=True, evidence=evidence)
 
 
-def _sa_xfrm_checks(sas: dict[str, str], xfrm: dict[str, str]) -> list[Check]:
+def _sa_xfrm_checks(
+    sas: dict[str, str],
+    xfrm: dict[str, str],
+    scenario: Scenario | None = None,
+) -> list[Check]:
     checks: list[Check] = []
+    policy = negotiated_policy(scenario or "secure-baseline")
     parsed_sas = {
         gateway: parse_sa(sas.get(gateway, ""))
         for gateway in ("gateway-a", "gateway-b")
@@ -203,12 +232,12 @@ def _sa_xfrm_checks(sas: dict[str, str], xfrm: dict[str, str]) -> list[Check]:
                 ),
                 _check(
                     f"proposal.ike.{gateway}",
-                    sa.ike_proposal == "AES_GCM_16_256/PRF_HMAC_SHA2_384/ECP_384",
+                    sa.ike_proposal == _policy_ike_proposal(policy),
                     sa.ike_proposal,
                 ),
                 _check(
                     f"proposal.esp.{gateway}",
-                    sa.esp_proposal == "AES_GCM_16_256",
+                    sa.esp_proposal == _policy_esp_proposal(policy),
                     sa.esp_proposal,
                 ),
                 _check(
@@ -218,7 +247,7 @@ def _sa_xfrm_checks(sas: dict[str, str], xfrm: dict[str, str]) -> list[Check]:
                 ),
             )
         )
-        parsed_xfrm = parse_xfrm(xfrm.get(gateway, ""), gateway, sa)
+        parsed_xfrm = parse_xfrm(xfrm.get(gateway, ""), gateway, sa, policy)
         checks.extend(
             (
                 _check(f"xfrm.state.{gateway}", parsed_xfrm.state_valid, "native ESP tunnel state"),
@@ -255,9 +284,10 @@ def _verification(run_id: str, checks: list[Check]) -> Verification:
 
 
 def evaluate_tunnel(
-    sas: dict[str, str], xfrm: dict[str, str], *, run_id: str = ""
+    sas: dict[str, str], xfrm: dict[str, str], *, run_id: str = "",
+    scenario: Scenario | None = None,
 ) -> Verification:
-    return _verification(run_id, _sa_xfrm_checks(sas, xfrm))
+    return _verification(run_id, _sa_xfrm_checks(sas, xfrm, scenario))
 
 
 def evaluate_ipsec(
@@ -267,14 +297,17 @@ def evaluate_ipsec(
     *,
     run_id: str = "",
     pfs: PfsObservation | None = None,
+    scenario: Scenario | None = None,
 ) -> Verification:
-    checks = list(evaluate_tunnel(sas, xfrm, run_id=run_id).checks)
+    checks = list(
+        evaluate_tunnel(sas, xfrm, run_id=run_id, scenario=scenario).checks
+    )
     checks.extend(_capture_checks(capture))
     if pfs is not None:
         checks.append(
             _check(
                 "pfs.rekey_fresh_dh",
-                pfs.status == "VERIFIED" and pfs.rekey_observed,
+                pfs.status == _expected_pfs_status(scenario) and pfs.rekey_observed,
                 pfs.status,
             )
         )
@@ -289,8 +322,9 @@ def evaluate_baseline(
     *,
     run_id: str = "",
     pfs: PfsObservation | None = None,
+    scenario: Scenario | None = None,
 ) -> Verification:
-    checks = _sa_xfrm_checks(sas, xfrm)
+    checks = _sa_xfrm_checks(sas, xfrm, scenario)
     traffic = parse_ping(ping)
     checks.append(
         _check(
@@ -304,7 +338,7 @@ def evaluate_baseline(
         checks.append(
             _check(
                 "pfs.rekey_fresh_dh",
-                pfs.status == "VERIFIED" and pfs.rekey_observed,
+                pfs.status == _expected_pfs_status(scenario) and pfs.rekey_observed,
                 pfs.status,
             )
         )
@@ -325,6 +359,38 @@ def _check(name: str, passed: bool, evidence: str) -> Check:
     return Check(name=name, passed=passed, evidence=(evidence,))
 
 
+def _proposal(
+    encryption: str,
+    keysize: str,
+    integrity: str = "",
+    prf: str = "",
+    dh_group: str = "",
+) -> str:
+    values = [f"{encryption}_{keysize}"] if encryption and keysize else []
+    values.extend(value for value in (integrity, prf, dh_group) if value)
+    return "/".join(values)
+
+
+def _policy_ike_proposal(policy: NegotiatedPolicy) -> str:
+    values = [policy.ike_encryption]
+    values.extend(
+        value
+        for value in (policy.ike_integrity, policy.ike_prf, policy.ike_dh_group)
+        if value
+    )
+    return "/".join(values)
+
+
+def _policy_esp_proposal(policy: NegotiatedPolicy) -> str:
+    return "/".join(
+        value for value in (policy.esp_encryption, policy.esp_integrity) if value
+    )
+
+
+def _expected_pfs_status(scenario: Scenario | None) -> str:
+    return "VERIFIED" if scenario is None or scenario.ipsec.pfs else "VERIFIED_DISABLED"
+
+
 def _parse_xfrm_states(text: str) -> tuple[XfrmState, ...]:
     records: list[XfrmState] = []
     for match in re.finditer(
@@ -342,6 +408,8 @@ def _parse_xfrm_states(text: str) -> tuple[XfrmState, ...]:
                 mode=_body_field(body, "mode"),
                 direction=_body_field(body, "dir"),
                 aes_gcm="aead rfc4106(gcm(aes))" in body,
+                aes_cbc="enc cbc(aes)" in body,
+                hmac_sha256="auth-trunc hmac(sha256)" in body,
             )
         )
     return tuple(records)
@@ -388,15 +456,23 @@ def _has_state(
     destination: str,
     direction: str,
     spi: str | None,
+    policy: NegotiatedPolicy | None = None,
 ) -> bool:
     expected_spi = _normalize_spi(spi)
+    policy = policy or negotiated_policy("secure-baseline")
     return any(
         state.source == source
         and state.destination == destination
         and state.direction == direction
         and state.protocol == "esp"
         and state.mode == "tunnel"
-        and state.aes_gcm
+        and (
+            state.aes_gcm
+            if policy.esp_encryption.startswith("AES_GCM")
+            else state.aes_cbc and (
+                not policy.esp_integrity or state.hmac_sha256
+            )
+        )
         and (not expected_spi or state.spi == expected_spi)
         for state in states
     )

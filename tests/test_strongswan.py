@@ -6,6 +6,7 @@ import unittest
 import signal
 
 from ipsec_sentinel.strongswan import GatewayFiles, StrongSwanPair
+from ipsec_sentinel.scenario import Scenario, scenario_path
 
 
 class StrongSwanRenderingTest(unittest.TestCase):
@@ -101,6 +102,34 @@ class StrongSwanRenderingTest(unittest.TestCase):
                 self.assertIn("mobike = no", text)
                 self.assertIn("encap = no", text)
                 self.assertNotIn("/etc/swanctl", text)
+
+    def test_rendering_uses_the_selected_allowlisted_scenario(self) -> None:
+        cases = {
+            "aes128-gcm": (
+                "proposals = aes128gcm16-prfsha384-ecp384",
+                "esp_proposals = aes128gcm16-ecp384",
+            ),
+            "aes256-cbc": (
+                "proposals = aes256-sha256-prfsha256-ecp384",
+                "esp_proposals = aes256-sha256-ecp384",
+            ),
+            "no-pfs": (
+                "proposals = aes256gcm16-prfsha384-ecp384",
+                "esp_proposals = aes256gcm16",
+            ),
+        }
+        for scenario_id, snippets in cases.items():
+            with self.subTest(scenario=scenario_id), TemporaryDirectory() as directory:
+                pair = StrongSwanPair(StringIO())
+                scenario = Scenario.load(scenario_path(scenario_id))
+                rendered = pair.render_configs(
+                    Path(directory), runtime_root=Path("/run/test-run"),
+                    scenario=scenario,
+                )
+                text = rendered["gateway-a"].swanctl.read_text()
+                self.assertIn(f"connections {{\n    {scenario_id} {{", text)
+                self.assertIn(snippets[0], text)
+                self.assertIn(snippets[1], text)
 
 
 if __name__ == "__main__":

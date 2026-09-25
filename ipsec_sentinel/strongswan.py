@@ -11,6 +11,7 @@ import signal
 import subprocess
 
 from ipsec_sentinel.command import run_checked
+from ipsec_sentinel.scenario import Scenario, scenario_path
 
 
 IKE_PROPOSAL = "aes256gcm16-prfsha384-ecp384"
@@ -86,7 +87,9 @@ class StrongSwanPair:
         run_dir: Path,
         *,
         runtime_root: Path | None = None,
+        scenario: Scenario | None = None,
     ) -> dict[str, GatewayFiles]:
+        scenario = scenario or Scenario.load(scenario_path("secure-baseline"))
         runtime_root = runtime_root or Path("/run/ipsec-sentinel") / run_dir.name
         rendered: dict[str, GatewayFiles] = {}
         for spec in GATEWAYS:
@@ -103,17 +106,19 @@ class StrongSwanPair:
                 log=runtime_dir / "charon.log",
             )
             files.strongswan.write_text(_strongswan_config(files), encoding="utf-8")
-            files.swanctl.write_text(_swanctl_config(spec), encoding="utf-8")
+            files.swanctl.write_text(
+                _swanctl_config(spec, scenario), encoding="utf-8"
+            )
             rendered[spec.name] = files
         self.files = rendered
         return rendered
 
-    def start(self, run_dir: Path) -> None:
+    def start(self, run_dir: Path, *, scenario: Scenario | None = None) -> None:
         self._require_root()
         if self._processes:
             raise RuntimeError("strongSwan pair already started")
         runtime_root = Path("/run/ipsec-sentinel") / run_dir.name
-        self.render_configs(run_dir, runtime_root=runtime_root)
+        self.render_configs(run_dir, runtime_root=runtime_root, scenario=scenario)
         try:
             for spec in GATEWAYS:
                 files = self.files[spec.name]
@@ -290,13 +295,13 @@ charon-systemd {{
 """
 
 
-def _swanctl_config(spec: _GatewaySpec) -> str:
+def _swanctl_config(spec: _GatewaySpec, scenario: Scenario) -> str:
     return f"""connections {{
-    secure-baseline {{
+    {scenario.id} {{
         version = 2
         local_addrs = {spec.local_address}
         remote_addrs = {spec.remote_address}
-        proposals = {IKE_PROPOSAL}
+        proposals = {scenario.ipsec.ike_proposal}
         mobike = no
         encap = no
         local {{
@@ -312,7 +317,7 @@ def _swanctl_config(spec: _GatewaySpec) -> str:
                 local_ts = {spec.local_ts}
                 remote_ts = {spec.remote_ts}
                 mode = tunnel
-                esp_proposals = {ESP_PROPOSAL}
+                esp_proposals = {scenario.ipsec.esp_proposal}
                 start_action = none
             }}
         }}

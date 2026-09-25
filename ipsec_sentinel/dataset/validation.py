@@ -78,7 +78,12 @@ def _validate_json_agreement(
         pfs = ipsec["observed"]["pfs"]  # type: ignore[index]
     except (KeyError, TypeError) as error:
         raise ValueError("ground truth lacks observed PFS evidence") from error
-    if pfs.get("status") != "VERIFIED" or pfs.get("rekey_observed") is not True:
+    try:
+        pfs_configured = bool(ipsec["configured"]["pfs"])  # type: ignore[index]
+    except (KeyError, TypeError) as error:
+        raise ValueError("ground truth lacks configured PFS policy") from error
+    expected_pfs = "VERIFIED" if pfs_configured else "VERIFIED_DISABLED"
+    if pfs.get("status") != expected_pfs or pfs.get("rekey_observed") is not True:
         raise ValueError("ground truth PFS rekey is not verified")
 
 

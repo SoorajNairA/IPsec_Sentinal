@@ -118,6 +118,7 @@ def run_secure_baseline(
             session.capture_evidence,  # type: ignore[arg-type]
             run_id=run_id,
             pfs=session.pfs,
+            scenario=loaded,
         )
         context["verification"] = verification
         if verification.status != "PASS":

@@ -2,7 +2,12 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
 
-from ipsec_sentinel.scenario import Scenario, ScenarioError
+from ipsec_sentinel.scenario import (
+    SUPPORTED_SCENARIOS,
+    Scenario,
+    ScenarioError,
+    scenario_path,
+)
 
 
 VALID_SCENARIO = """\
@@ -51,6 +56,37 @@ class ScenarioTest(unittest.TestCase):
         self.assertEqual(scenario.traffic.type, "icmp")
         self.assertEqual(scenario.traffic.count, 5)
         self.assertTrue(scenario.capture.enabled)
+
+    def test_loads_each_allowlisted_crypto_policy(self) -> None:
+        expected = {
+            "secure-baseline": (
+                "aes256gcm16-prfsha384-ecp384", "aes256gcm16-ecp384", True
+            ),
+            "aes128-gcm": (
+                "aes128gcm16-prfsha384-ecp384", "aes128gcm16-ecp384", True
+            ),
+            "aes256-cbc": (
+                "aes256-sha256-prfsha256-ecp384", "aes256-sha256-ecp384", True
+            ),
+            "no-pfs": (
+                "aes256gcm16-prfsha384-ecp384", "aes256gcm16", False
+            ),
+        }
+
+        self.assertEqual(tuple(expected), SUPPORTED_SCENARIOS)
+        for scenario_id, policy in expected.items():
+            with self.subTest(scenario=scenario_id):
+                scenario = Scenario.load(scenario_path(scenario_id))
+                self.assertEqual(scenario.id, scenario_id)
+                self.assertEqual(
+                    (scenario.ipsec.ike_proposal, scenario.ipsec.esp_proposal,
+                     scenario.ipsec.pfs),
+                    policy,
+                )
+
+    def test_scenario_path_rejects_ids_outside_allowlist(self) -> None:
+        with self.assertRaisesRegex(ScenarioError, "unsupported scenario"):
+            scenario_path("experimental")
 
     def test_rejects_an_unknown_top_level_field(self) -> None:
         invalid = VALID_SCENARIO + "future_matrix: true\n"

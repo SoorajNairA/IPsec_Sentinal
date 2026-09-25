@@ -11,6 +11,7 @@ from ipsec_sentinel.evidence import (
     parse_xfrm,
 )
 from ipsec_sentinel.models import CaptureEvidence, PfsObservation
+from ipsec_sentinel.scenario import Scenario, scenario_path
 
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -84,6 +85,69 @@ class EvidenceParsingTest(unittest.TestCase):
             "NOT_VERIFIED",
         )
         self.assertEqual(incomplete.status, "NOT_VERIFIED")
+
+    def test_disabled_pfs_requires_rekey_and_absence_of_child_dh(self) -> None:
+        before, _, _, _ = baseline_inputs()
+        after = {
+            gateway: text.replace("c2ad5304", "a1a2a3a4").replace(
+                "cbecd5e6", "b1b2b3b4"
+            )
+            for gateway, text in before.items()
+        }
+
+        verified = evaluate_pfs(
+            before, after,
+            "selected proposal: ESP:AES_GCM_16_256/NO_EXT_SEQ\n",
+            attempted=True, pfs_required=False,
+            expected_child_proposal="AES_GCM_16_256",
+        )
+        unexpected_dh = evaluate_pfs(
+            before, after,
+            "selected proposal: ESP:AES_GCM_16_256/ECP_384/NO_EXT_SEQ\n",
+            attempted=True, pfs_required=False,
+            expected_child_proposal="AES_GCM_16_256",
+        )
+
+        self.assertEqual(verified.status, "VERIFIED_DISABLED")
+        self.assertTrue(verified.rekey_observed)
+        self.assertEqual(unexpected_dh.status, "NOT_VERIFIED")
+
+    def test_scenario_policy_controls_negotiated_proposal_checks(self) -> None:
+        sas, xfrm, _, _ = baseline_inputs()
+        aes128 = Scenario.load(scenario_path("aes128-gcm"))
+        aes128_sas = {
+            gateway: text.replace("encr-keysize=256", "encr-keysize=128")
+            for gateway, text in sas.items()
+        }
+
+        self.assertEqual(
+            evaluate_tunnel(aes128_sas, xfrm, scenario=aes128).status, "PASS"
+        )
+        self.assertEqual(evaluate_tunnel(sas, xfrm, scenario=aes128).status, "FAIL")
+
+        cbc = Scenario.load(scenario_path("aes256-cbc"))
+        cbc_sas = {
+            gateway: text.replace("AES_GCM_16", "AES_CBC").replace(
+                "PRF_HMAC_SHA2_384", "PRF_HMAC_SHA2_256"
+            ).replace(
+                "encr-keysize=256 bytes-in",
+                "encr-keysize=256 integ-alg=HMAC_SHA2_256_128 bytes-in",
+            )
+            for gateway, text in sas.items()
+        }
+        cbc_xfrm = {
+            gateway: text.replace(
+                "aead rfc4106(gcm(aes)) 0x00112233 128",
+                "enc cbc(aes) 0x00112233\n\tauth-trunc hmac(sha256) 0xaabbccdd 128",
+            ).replace(
+                "aead rfc4106(gcm(aes)) 0x44556677 128",
+                "enc cbc(aes) 0x44556677\n\tauth-trunc hmac(sha256) 0xeeff0011 128",
+            )
+            for gateway, text in xfrm.items()
+        }
+        self.assertEqual(
+            evaluate_tunnel(cbc_sas, cbc_xfrm, scenario=cbc).status, "PASS"
+        )
 
     def test_parser_uses_new_installed_child_while_old_child_is_deleted(self) -> None:
         text = (
