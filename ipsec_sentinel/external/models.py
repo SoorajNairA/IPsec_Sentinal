@@ -34,6 +34,14 @@ class ExternalPacketObservation:
         if self.direction not in ("forward", "reverse"):
             raise ValueError("direction must be forward or reverse")
 
+    @property
+    def relative_time_seconds(self) -> float:
+        return self.relative_timestamp_us / 1_000_000
+
+    @property
+    def length(self) -> int:
+        return self.packet_size_bytes
+
 
 @dataclass(frozen=True)
 class ExternalSession:
@@ -63,4 +71,3 @@ class ExternalSession:
         ):
             if len({getattr(item, field) for item in self.observations}) != 1:
                 raise ValueError(f"mixed {field} values in external session")
-

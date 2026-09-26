@@ -3,9 +3,10 @@ from __future__ import annotations
 from collections import Counter
 import math
 import statistics
+from typing import Sequence
 
+from ipsec_sentinel.ml.observations import PacketObservation
 from ipsec_sentinel.ml.schema import FEATURE_NAMES, IAT_STAT_NAMES, SIZE_STAT_NAMES
-from ipsec_sentinel.pcap import EspPacket
 
 
 def _percentile(values: list[float], percent: float) -> float:
@@ -70,14 +71,14 @@ def _coefficient_of_variation(values: list[float]) -> float:
     return 0.0 if mean == 0 else float(statistics.pstdev(values) / mean)
 
 
-def _iats(packets: list[EspPacket]) -> list[float]:
+def _iats(packets: Sequence[PacketObservation]) -> list[float]:
     return [
         right.relative_time_seconds - left.relative_time_seconds
         for left, right in zip(packets, packets[1:])
     ]
 
 
-def extract_session_features(packets: tuple[EspPacket, ...]) -> dict[str, float]:
+def extract_session_features(packets: Sequence[PacketObservation]) -> dict[str, float]:
     if not packets:
         raise ValueError("cannot extract features from an empty session")
     packet_list = list(packets)
@@ -105,7 +106,7 @@ def extract_session_features(packets: tuple[EspPacket, ...]) -> dict[str, float]
         byte_rate=0.0 if duration == 0 else total_bytes / duration,
     )
 
-    directional: dict[str, list[EspPacket]] = {
+    directional: dict[str, list[PacketObservation]] = {
         direction: [
             packet for packet in packet_list if packet.direction == direction
         ]
@@ -177,8 +178,8 @@ def extract_session_features(packets: tuple[EspPacket, ...]) -> dict[str, float]
         0.0 if len(packet_list) < 2 else switches / (len(packet_list) - 1)
     )
 
-    runs: list[list[EspPacket]] = []
-    bursts: list[list[EspPacket]] = []
+    runs: list[list[PacketObservation]] = []
+    bursts: list[list[PacketObservation]] = []
     for packet in packet_list:
         if not runs or runs[-1][-1].direction != packet.direction:
             runs.append([packet])
