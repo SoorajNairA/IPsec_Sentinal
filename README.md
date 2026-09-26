@@ -241,6 +241,24 @@ $MLPY -m ipsec_sentinel.ml predict \
 
 The split unit is a complete session, stratified by traffic class and IPsec scenario. No packets/windows from one session can cross train, validation, or test. Pilot metrics based on three sessions per class are pipeline evidence only; use the 168-session matrix before drawing performance or cross-scenario generalization conclusions.
 
+## External dataset evidence
+
+Public datasets live outside the repository and outside OneDrive. Install the optional inspection dependencies, select a WSL ext4 root, and use the allowlisted commands:
+
+```bash
+~/.venvs/ipsec-sentinel-ml/bin/pip install -r requirements-external.txt
+export IPSEC_SENTINEL_EXTERNAL_DATA_ROOT=/home/$USER/ipsec-sentinel-external-datasets
+
+~/.venvs/ipsec-sentinel-ml/bin/python -m ipsec_sentinel.external registry validate
+~/.venvs/ipsec-sentinel-ml/bin/python -m ipsec_sentinel.external acquire usbvpn2022 --resume
+~/.venvs/ipsec-sentinel-ml/bin/python -m ipsec_sentinel.external inspect usbvpn2022
+~/.venvs/ipsec-sentinel-ml/bin/python -m ipsec_sentinel.external report
+```
+
+Acquisition receipts, inspection inventories, and compatibility reports are written beneath that external root. Raw public artifacts, extracted files, normalized observations, and reports are never committed. Source labels are accepted only through exact registry mappings. External observations may cross into the statistical calculator only as relative time, size, and direction; source IDs, filenames, protocols, ports, labels, addresses, and absolute timestamps are excluded from the feature schema.
+
+External data is evaluation-only. Primary supervised training requires native `training_ready` sessions with `known_training_class == true` and an allowlisted class; public datasets are never mixed into the native training table.
+
 ## Tests
 
 Unit tests do not require privileges. The integration test creates the real tunnel and must run as root:

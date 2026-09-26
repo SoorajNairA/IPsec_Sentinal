@@ -14,6 +14,7 @@ from ipsec_sentinel.external.acquire import (
 from ipsec_sentinel.external.config import ExternalConfig
 from ipsec_sentinel.external.inspect import ArchiveSafetyError, InspectionReport, inspect_artifact
 from ipsec_sentinel.external.registry import ExternalDatasetRegistry, SourceRecord
+from ipsec_sentinel.external.report import build_external_report, write_external_report
 from ipsec_sentinel.external.storage import ExternalPaths
 
 
@@ -137,7 +138,10 @@ def main(argv: list[str] | None = None) -> int:
                 raise RuntimeError("source lacks a compatible inspection")
             # Source adapters are registered only after real schema inspection.
             raise RuntimeError("source adapter is not registered")
-        raise RuntimeError("report generation is not implemented")
+        report = build_external_report(registry, paths)
+        written = write_external_report(report, paths)
+        print(json.dumps({name: str(path) for name, path in written.items()}, sort_keys=True))
+        return 0
     except AcquisitionError as exc:
         print(json.dumps({"error": str(exc), "category": exc.category}))
         return EXIT_CHECKSUM if exc.category == "checksum" else EXIT_ACQUISITION
