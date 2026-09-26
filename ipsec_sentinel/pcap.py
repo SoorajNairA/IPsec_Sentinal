@@ -143,21 +143,29 @@ def derive_workload_esp(
     try:
         with source_path.open("rb") as source:
             global_header, endian, fraction_to_ns = _read_header(source)
-            with tempfile.NamedTemporaryFile(
-                mode="wb", dir=destination.parent, prefix=f".{destination.name}.", delete=False
-            ) as output:
-                temporary_name = output.name
-                output.write(global_header)
-                for record in _records(source, endian, fraction_to_ns):
-                    if (
-                        window.started_unix_ns <= record.timestamp_ns <= window.finished_unix_ns
-                        and _is_peer_esp(record.payload, peers)
-                    ):
-                        output.write(record.header)
-                        output.write(record.payload)
-                        timestamps.append(record.timestamp_ns)
-                output.flush()
-                os.fsync(output.fileno())
+            selected = [
+                record
+                for record in _records(source, endian, fraction_to_ns)
+                if (
+                    window.started_unix_ns <= record.timestamp_ns <= window.finished_unix_ns
+                    and _is_peer_esp(record.payload, peers)
+                )
+            ]
+        # Linux capture delivery can contain very small timestamp inversions under
+        # load. Stable ordering makes the derived ML sequence deterministic while
+        # leaving the complete evidence capture untouched.
+        selected.sort(key=lambda record: record.timestamp_ns)
+        with tempfile.NamedTemporaryFile(
+            mode="wb", dir=destination.parent, prefix=f".{destination.name}.", delete=False
+        ) as output:
+            temporary_name = output.name
+            output.write(global_header)
+            for record in selected:
+                output.write(record.header)
+                output.write(record.payload)
+                timestamps.append(record.timestamp_ns)
+            output.flush()
+            os.fsync(output.fileno())
         Path(temporary_name).replace(destination)
         temporary_name = None
     finally:

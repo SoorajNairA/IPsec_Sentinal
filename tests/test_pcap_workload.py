@@ -73,6 +73,40 @@ class WorkloadPcapTest(unittest.TestCase):
             )
             self.assertEqual(summary.packet_count, 1)
 
+    def test_derivation_stably_orders_small_source_timestamp_inversions(self) -> None:
+        with TemporaryDirectory() as directory:
+            source = Path(directory) / "source.pcap"
+            output = Path(directory) / "output.pcap"
+            frame = ethernet_ipv4("192.0.2.1", "192.0.2.2", 50, b"esp")
+            write_pcap(
+                source,
+                [
+                    (1_200_000_000, frame + b"later-first"),
+                    (1_100_000_000, frame + b"earlier-second"),
+                    (1_200_000_000, frame + b"same-time-stable"),
+                ],
+                nanoseconds=True,
+            )
+
+            summary = derive_workload_esp(
+                source,
+                output,
+                WorkloadWindow(1_000_000_000, 2_000_000_000),
+                ("192.0.2.1", "192.0.2.2"),
+            )
+
+            self.assertEqual(summary.packet_count, 3)
+            self.assertEqual(summary.first_timestamp_ns, 1_100_000_000)
+            self.assertEqual(summary.last_timestamp_ns, 1_200_000_000)
+            self.assertEqual(
+                inspect_ml_pcap(
+                    output,
+                    WorkloadWindow(1_000_000_000, 2_000_000_000),
+                    ("192.0.2.1", "192.0.2.2"),
+                ).packet_count,
+                3,
+            )
+
     def test_rejects_unsupported_link_type_and_truncated_record(self) -> None:
         with TemporaryDirectory() as directory:
             bad = Path(directory) / "bad.pcap"
