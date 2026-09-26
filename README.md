@@ -1,6 +1,6 @@
 # IPsec Sentinel
 
-IPsec Sentinel is a Linux-first IPsec testbed, evidence verifier, and reproducible encrypted-traffic dataset factory. It creates a genuine IKEv2 site-to-site tunnel with strongSwan, runs a known local workload through Linux XFRM, captures UDP/500 and native protocol-50 ESP, and writes configured-versus-observed evidence. Phase 2 adds dataset generation without changing the Phase 1 `run_secure_baseline()` behavior. It deliberately performs no feature extraction, dataset cleaning for ML, model training, UI work, NAT/NAT-T scenario, or generalized algorithm matrix.
+IPsec Sentinel is a Linux-first IPsec testbed, evidence verifier, reproducible encrypted-traffic dataset factory, and classical ESP-session classifier prototype. It creates a genuine IKEv2 site-to-site tunnel with strongSwan, runs a known local workload through Linux XFRM, captures UDP/500 and native protocol-50 ESP, and writes configured-versus-observed evidence. The prototype adds leakage-controlled full-session metadata features and an exported scikit-learn model without changing the Phase 1 `run_secure_baseline()` behavior. It does not decrypt payloads and does not implement deep learning, a service API, a UI, cloud deployment, NAT/NAT-T, OOD rejection, or network impairment profiles.
 
 ## Topology
 
@@ -140,6 +140,12 @@ The supported traffic classes are:
 - `icmp`: seeded count, interval, and payload size.
 - `web`: seeded local page/resource order, sizes, and think times, with matching client records and server receipts.
 - `video`: seeded local segment profile, sequence, sizes, and pacing, with matching client records and server receipts.
+- `voip`: synthetic RTPv2/UDP-style bidirectional voice cadence with seeded packetization interval, talk-spurt timing, payload sizes, and call duration.
+- `email`: local SMTP transactions with seeded message/body/attachment sizes, connection grouping, recipients, and think times.
+- `messaging`: persistent bidirectional framed TCP chat with seeded bursts, directions, message sizes, replies, and idle gaps.
+- `file_transfer`: checksum-verified bulk TCP upload, download, or bidirectional transfer with seeded sizes and write behavior.
+
+The allowlisted IPsec scenarios are `secure-baseline`, `aes128-gcm`, `aes256-cbc`, and `no-pfs`. All retain IKEv2, the same protected/transit topology, and independent SA/XFRM/capture verification. The first three verify CHILD PFS after rekey with ECP-384. `no-pfs` verifies a changed CHILD SA without CHILD DH and records `VERIFIED_DISABLED` rather than mislabeling PFS as enabled.
 
 The same generator version, scenario, and seed resolves the same workload parameters where practical. Different attempt seeds vary meaningful workload parameters. Every resolved value and observed result is written to `traffic.json`; no Internet service or third-party content is used.
 
@@ -154,7 +160,7 @@ sudo python3 -m ipsec_sentinel.dataset generate configs/smoke-v1.yaml --resume
 python3 -m ipsec_sentinel.dataset validate dataset/cipherlens-smoke-v1
 ```
 
-`full-evidence.pcap` preserves the complete secure session: IKE establishment, workload ESP, and rekey/PFS evidence. `encrypted.pcap` is the future-ML input. It is deterministically derived from the full capture after the run by retaining only Ethernet/IPv4 protocol-50 packets exchanged between `192.0.2.1` and `192.0.2.2` whose PCAP timestamps fall inclusively between the nanosecond timestamps taken immediately before and after the workload process. The derived file is then parsed again and rejected if it contains a non-ESP packet, a wrong peer, an out-of-window timestamp, or zero packets. IKE establishment and rekey occur outside this workload window, so they cannot become classifier shortcuts.
+`full-evidence.pcap` preserves the complete secure session: IKE establishment, workload ESP, and rekey/PFS evidence. `encrypted.pcap` is the ML input. It is deterministically derived from the full capture after the run by retaining only Ethernet/IPv4 protocol-50 packets exchanged between `192.0.2.1` and `192.0.2.2` whose PCAP timestamps fall inclusively between the nanosecond timestamps taken immediately before and after the workload process. Selected records are stably ordered by timestamp because Linux capture delivery can contain microsecond-scale inversions under load; the source evidence file is never rewritten. The derived file is parsed again and rejected if it contains a non-ESP packet, a wrong peer, an out-of-window timestamp, a remaining timestamp inversion, or zero packets. IKE establishment and rekey occur outside this workload window, so they cannot become classifier shortcuts.
 
 Each successful attempt records the requested policy separately from live SA/XFRM/capture observations. PFS is configured policy until an explicit CHILD_SA rekey changes reciprocal SPIs and a fresh ECP-384 DH selection appears in the new daemon log segment. Dataset validation requires verified traffic, IPsec, capture separation, and cleanup; `PASS` alone cannot make a run training-ready unless every requirement passes.
 
@@ -187,16 +193,53 @@ dataset/<dataset-name>/
 
 The offline validator reconciles the manifest, terminal JSON, ground-truth label, traffic parameters, PFS status, capture counts, capture size, workload window, and required files. It reparses every training-ready `encrypted.pcap` using the strict ESP-only contract. Failed and incomplete attempts remain inspectable but are excluded from the successful training-ready set.
 
-For resumable unattended collection, create and review a larger matrix first, then replace only the matrix path in this pattern:
+The reviewed first production matrix is `configs/prototype-v1.yaml`: seven supervised classes × four IPsec scenarios × one clean network profile × six independent repetitions = 168 sessions. Start or resume it unattended from the repository root with:
 
 ```bash
-sudo nohup python3 -m ipsec_sentinel.dataset generate configs/smoke-v1.yaml --resume \
-  > dataset-generation.log 2>&1 &
+sudo -v
+sudo nohup python3 -m ipsec_sentinel.dataset generate configs/prototype-v1.yaml --resume \
+  > dataset/prototype-v1-generation.log 2>&1 &
 ```
 
 A host-native supervisor such as systemd is preferred for long collections. A force-kill can leave a `RUNNING` row; the next `--resume` converts it to `INCOMPLETE` before deciding whether to retry. Execution is intentionally serial in Phase 2.
 
 New generators implement the five-method traffic contract: `prepare(context)`, `run(context)`, `validate(context, result)`, `cleanup(context)`, and `metadata()`. They must be locally controlled, seed all planned variability, record every selected parameter, validate the intended class from both available endpoints, and make cleanup idempotent before registration in the traffic registry.
+
+## ESP feature and model pipeline
+
+Install the optional ML dependencies in a virtual environment:
+
+```bash
+python3 -m venv ~/.venvs/ipsec-sentinel-ml
+~/.venvs/ipsec-sentinel-ml/bin/pip install -r requirements-ml.txt
+```
+
+The feature schema is versioned as `ipsec-sentinel.esp-session-features/v1`. It summarizes one complete workload-window session using only relative packet times, outer ESP packet lengths, and peer direction. It excludes labels, seeds, scenario names, ports, IP-address values, run IDs, absolute timestamps, IKE/rekey packets, and payload contents. Build, split, benchmark/evaluate/export, and infer with:
+
+```bash
+python3 -m ipsec_sentinel.dataset validate dataset/ipsec-sentinel-prototype-v1
+
+MLPY=~/.venvs/ipsec-sentinel-ml/bin/python
+$MLPY -m ipsec_sentinel.ml build \
+  dataset/ipsec-sentinel-prototype-v1 \
+  dataset/ipsec-sentinel-prototype-v1/ml
+$MLPY -m ipsec_sentinel.ml split \
+  dataset/ipsec-sentinel-prototype-v1/ml/features.csv \
+  dataset/ipsec-sentinel-prototype-v1/ml/split_manifest.json \
+  --seed 20260926
+$MLPY -m ipsec_sentinel.ml train \
+  dataset/ipsec-sentinel-prototype-v1/ml/features.csv \
+  dataset/ipsec-sentinel-prototype-v1/ml/split_manifest.json \
+  dataset/ipsec-sentinel-prototype-v1/ml/model \
+  --seed 20260926
+$MLPY -m ipsec_sentinel.ml predict \
+  path/to/encrypted.pcap \
+  --model-dir dataset/ipsec-sentinel-prototype-v1/ml/model
+```
+
+`train` intentionally performs benchmark selection, held-out evaluation, and export as one leakage-safe operation. It compares Random Forest, Extra Trees, and Histogram Gradient Boosting using validation macro-F1, then writes the chosen model, immutable feature schema, class map, split manifest, metrics, and reproducibility metadata. Confidence is raw `predict_proba`, explicitly not calibrated. Inference is labeled `AI-INFERRED` and states that no payload was decrypted.
+
+The split unit is a complete session, stratified by traffic class and IPsec scenario. No packets/windows from one session can cross train, validation, or test. Pilot metrics based on three sessions per class are pipeline evidence only; use the 168-session matrix before drawing performance or cross-scenario generalization conclusions.
 
 ## Tests
 
@@ -227,10 +270,10 @@ The runner does not use wildcard process killing. A host crash or force-kill tha
 
 ## Limitations and next phase
 
-Only `secure-baseline` is supported: IKEv2, IPv4 tunnel mode, PSK authentication, AES-256-GCM, ECP-384, and PFS rekey. Dataset workloads are ICMP, local HTTP Web, and local segmented Video over the clean network profile. The deterministic lab PSK is test-only. There is no NAT-T, IPv6, transport mode, IKEv1, impairment injection, parallel execution, security scoring, UI, or cloud support.
+The prototype supports four tightly allowlisted IPsec policies and seven local supervised workloads over the clean network profile. The deterministic lab PSK is test-only. The traffic generators are controlled behavioral simulations rather than public services, and the VoIP generator models RTP cadence rather than encoding live audio. There is no NAT-T, IPv6, transport mode, IKEv1, OOD dataset, impairment injection, parallel execution, security scoring, API, UI, or cloud support.
 
 The compact ground-truth schema stores configured policy, negotiated proposals, PFS evidence, traffic outcome, and capture counts. Detailed identities, selectors, SA states/SPIs, and XFRM directions remain in `verification.json` and the retained raw evidence files instead of being duplicated into `ground_truth.json`.
 
 On this WSL2/veth kernel, a broad AF_PACKET capture on a gateway endpoint exposes a post-decryption inbound inner packet artifact. IPsec Sentinel therefore retains a filtered outer-wire PCAP plus broad audit PCAPs from both transit endpoints. Cleartext exclusion is based on cross-endpoint packet correlation, while bidirectional ESP and SPI-correlated XFRM/CHILD state provide independent corroboration. This is still a virtual-interface observation, not a physical-tap proof.
 
-Phase 2 ends at validated evidence and dataset creation. It does not extract features, clean data for ML, construct train/test splits, train classifiers, evaluate models, or export a model. Those are Phase 3 concerns and require separate review and authorization.
+The exported model is a classical proof of the end-to-end pipeline, not a production classifier. The 21-session pilot has only one validation and one test session per class, one IPsec scenario, no external captures, no calibrated probabilities, and no OOD rejection. The strict standalone inference command validates that its input file is ESP-only and peer-matched, but without the run's ground truth it cannot independently reconstruct the original workload-window timestamps. Production claims require the full balanced matrix and a separate evaluation phase.

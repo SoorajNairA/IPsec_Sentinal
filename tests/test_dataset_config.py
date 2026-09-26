@@ -54,6 +54,15 @@ class DatasetConfigTest(unittest.TestCase):
         self.assertEqual(len(config.traffic_classes), 7)
         self.assertEqual(config.runs_per_combination, 6)
 
+    def test_repository_pilot_is_seven_classes_three_repetitions_baseline_only(self) -> None:
+        config = DatasetConfig.load(Path("configs/prototype-pilot-v1.yaml"))
+
+        self.assertEqual(config.name, "ipsec-sentinel-prototype-pilot-v1")
+        self.assertEqual(len(config.traffic_classes), 7)
+        self.assertEqual(config.scenarios, ("secure-baseline",))
+        self.assertEqual(config.network_profiles, ("clean",))
+        self.assertEqual(config.runs_per_combination, 3)
+
     def test_rejects_scenarios_outside_the_allowlist(self) -> None:
         with self.assertRaisesRegex(DatasetConfigError, "IPsec scenario"):
             self.load(VALID.replace("secure-baseline", "experimental"))
