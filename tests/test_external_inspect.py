@@ -134,6 +134,28 @@ class ExternalInspectTest(unittest.TestCase):
                 {"missing_timestamp", "missing_size", "missing_direction", "missing_session", "missing_label"},
             )
 
+    def test_object_dataset_is_never_deserialized_for_sampling(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            base = Path(temporary)
+            source = base / "object.h5"
+            with h5py.File(source, "w") as output:
+                output.attrs["empty"] = h5py.Empty("f")
+                output.create_dataset(
+                    "object_block",
+                    data=np.asarray([b"opaque"], dtype=object),
+                    dtype=h5py.special_dtype(vlen=bytes),
+                )
+            paths = ExternalPaths.create(base / "external")
+
+            report = inspect_artifact(
+                REGISTRY.source("mit_ll_vnat"), _verified(source), paths
+            )
+
+        dataset = next(item for item in report.structure if item["kind"] == "dataset")
+        self.assertEqual(dataset["sample_omitted"], "variable-length/object dataset")
+        self.assertNotIn("sample", dataset)
+        self.assertIn("unbounded_object_block", report.compatibility_reasons)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -114,16 +114,19 @@ sources:
     declared_formats: [hdf5]
     declared_labels: [Streaming, VoIP, Chat, C2, File Transfer]
     intended_use: Inspect the packet dataframe for compatible VPN-session external evaluation without acquiring raw PCAP.
-    acquisition_state: not_downloaded
+    acquisition_state: verified
     inspection:
-      state: uninspected
-      inspected_at: null
-      artifact_sha256: null
-      observed_formats: []
-      observed_protocols: []
-      observed_labels: []
+      state: incompatible
+      inspected_at: "2026-09-26"
+      artifact_sha256: 5d0c3d76cd292f19e25b5229719264bc1ddd71920a20bb27a7dec6c7138914de
+      observed_formats: [hdf5, pandas_fixed]
+      observed_protocols: [vpn_unspecified, non_vpn]
+      observed_labels: [Streaming, VoIP, Chat, C2, File Transfer]
       adapter_id: null
-      notes: []
+      notes:
+        - 33,711 connection rows with connection, timestamps, sizes, directions, and file_names columns are serialized in one legacy pandas fixed-format ObjectAtom VLArray row.
+        - Reading any row from the object block deserializes the full payload and consumed nearly all 7.4 GiB available WSL memory during inspection.
+        - No bounded incremental adapter is available; public features are not substituted for the native feature schema.
     artifacts:
       - artifact_id: mit_ll_vnat_dataframe
         filename: VNAT_Dataframe_release_1.h5
@@ -132,10 +135,10 @@ sources:
         published_size_bytes: 1045436008
         publisher_checksum: null
         local_verification:
-          actual_size_bytes: null
-          sha256: null
-          verified_at: null
-          result: not_downloaded
+          actual_size_bytes: 1045436008
+          sha256: 5d0c3d76cd292f19e25b5229719264bc1ddd71920a20bb27a7dec6c7138914de
+          verified_at: "2026-09-26T13:39:50.239243+00:00"
+          result: verified
     label_mappings:
       Streaming: video
       VoIP: voip
@@ -161,14 +164,17 @@ sources:
     intended_use: Metadata-only cross-VPN validation candidate unless a reasonably sized official representation becomes available.
     acquisition_state: metadata_only
     inspection:
-      state: uninspected
-      inspected_at: null
+      state: catalog_only
+      inspected_at: "2026-09-26"
       artifact_sha256: null
-      observed_formats: []
-      observed_protocols: []
-      observed_labels: []
+      observed_formats: [pcap, flow_csv]
+      observed_protocols: [openvpn_udp]
+      observed_labels: [Web Browsing, Email, Chat, Streaming, File Transfer, VoIP, P2P]
       adapter_id: null
-      notes: [Full approximately 28 GB collection intentionally not acquired.]
+      notes:
+        - Official page describes 28 GB of labeled full-packet PCAP and ISCXFlowMeter CSV for seven VPN and seven non-VPN categories.
+        - VPN captures use OpenVPN in UDP mode; access uses the publisher's short reporting form and citation is required.
+        - Full collection intentionally not acquired; redistribution grant beyond researcher availability and citation was not identified.
     artifacts: []
     label_mappings:
       Web Browsing: web

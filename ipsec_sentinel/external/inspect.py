@@ -143,7 +143,9 @@ def _json_value(value: Any) -> Any:
         return [_json_value(item) for item in value]
     if isinstance(value, dict):
         return {str(key): _json_value(item) for key, item in value.items()}
-    return value
+    if value is None or isinstance(value, (bool, int, float, str)):
+        return value
+    return repr(value)
 
 
 def _inspect_hdf5(path: Path) -> tuple[list[dict[str, object]], dict[str, str], list[str]]:
@@ -151,6 +153,7 @@ def _inspect_hdf5(path: Path) -> tuple[list[dict[str, object]], dict[str, str], 
 
     structure: list[dict[str, object]] = []
     fields: set[str] = set()
+    reasons: list[str] = []
     with h5py.File(path, "r") as source:
         def visit(name: str, item: h5py.Group | h5py.Dataset) -> None:
             record: dict[str, object] = {
@@ -165,21 +168,33 @@ def _inspect_hdf5(path: Path) -> tuple[list[dict[str, object]], dict[str, str], 
                     dtype=str(item.dtype),
                     shape=list(item.shape),
                     fields=names,
-                    sample=[_json_value(value) for value in item[: min(5, item.shape[0])]]
-                    if item.shape else [_json_value(item[()])],
                 )
+                if item.dtype.kind == "O":
+                    record["sample_omitted"] = "variable-length/object dataset"
+                    if "unbounded_object_block" not in reasons:
+                        reasons.append("unbounded_object_block")
+                else:
+                    sample = (
+                        [_json_value(value) for value in item[: min(5, item.shape[0])]]
+                        if item.shape else [_json_value(item[()])]
+                    )
+                    record["sample"] = sample
+                    if item.name.rsplit("/", 1)[-1] in ("axis0", "block0_items"):
+                        fields.update(str(value) for value in sample)
             structure.append(record)
         source.visititems(visit)
 
     patterns = {
-        "timestamp": ("timestamp", "time"),
-        "size": ("packet_size", "packet_length", "size", "length"),
-        "direction": ("direction", "dir"),
-        "session": ("session_id", "flow_id", "connection_id", "session", "flow"),
-        "label": ("label", "class", "category"),
+        "timestamp": ("timestamp", "timestamps", "time"),
+        "size": ("packet_size", "packet_length", "size", "sizes", "length"),
+        "direction": ("direction", "directions", "dir"),
+        "session": (
+            "session_id", "flow_id", "connection_id", "connection", "connections",
+            "session", "flow",
+        ),
+        "label": ("label", "class", "category", "file_name", "file_names"),
     }
     findings: dict[str, str] = {}
-    reasons: list[str] = []
     lowered = {field.casefold(): field for field in fields}
     for semantic, candidates in patterns.items():
         matches = {

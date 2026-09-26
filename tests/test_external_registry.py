@@ -106,7 +106,7 @@ class ExternalRegistryTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ExternalDatasetRegistry.load(path)
 
-    def test_registry_records_inspected_usb_but_not_uninspected_vnat_schema(self):
+    def test_registry_records_evidence_gated_usb_and_vnat_schemas(self):
         registry = ExternalDatasetRegistry.load(REGISTRY)
         usb = registry.source("usbvpn2022")
         self.assertEqual(usb.inspection.state, InspectionState.INCOMPATIBLE)
@@ -119,10 +119,13 @@ class ExternalRegistryTest(unittest.TestCase):
         self.assertIsNone(usb.inspection.adapter_id)
 
         vnat = registry.source("mit_ll_vnat")
-        self.assertEqual(vnat.inspection.state, InspectionState.UNINSPECTED)
-        self.assertEqual(vnat.inspection.observed_formats, ())
-        self.assertEqual(vnat.inspection.observed_protocols, ())
-        self.assertEqual(vnat.inspection.observed_labels, ())
+        self.assertEqual(vnat.inspection.state, InspectionState.INCOMPATIBLE)
+        self.assertEqual(vnat.inspection.observed_formats, ("hdf5", "pandas_fixed"))
+        self.assertEqual(vnat.inspection.observed_protocols, ("vpn_unspecified", "non_vpn"))
+        self.assertEqual(
+            vnat.inspection.observed_labels,
+            ("Streaming", "VoIP", "Chat", "C2", "File Transfer"),
+        )
         self.assertIsNone(vnat.inspection.adapter_id)
 
 

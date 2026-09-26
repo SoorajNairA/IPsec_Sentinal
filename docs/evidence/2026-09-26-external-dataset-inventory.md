@@ -49,8 +49,18 @@ Compatibility decision: **catalog-only**. This source is useful for external pro
 
 ## VNAT
 
-Not yet acquired. Only the approximately 1.05 GB HDF5 dataframe is allowlisted. The 36.1 GB PCAP archive is intentionally excluded.
+- Authoritative source: `https://www.ll.mit.edu/r-d/datasets/vpnnonvpn-network-application-traffic-dataset-vnat`
+- Artifact: `VNAT_Dataframe_release_1.h5`
+- Publisher and observed size: 1,045,436,008 bytes
+- Publisher checksum: absent
+- Local SHA-256: `5d0c3d76cd292f19e25b5229719264bc1ddd71920a20bb27a7dec6c7138914de`
+- HDF5 logical rows: 33,711 connections
+- Columns: `connection`, `timestamps`, `sizes`, `directions`, and `file_names`
+
+The file is a legacy pandas fixed-format frame. All five columns for all 33,711 rows are stored in one `ObjectAtom` VLArray row. Reading that row deserializes the entire payload; the initial generic sample attempt reached approximately 6.9 GiB RSS and was stopped before exhausting the 7.4 GiB WSL memory limit. The inspector now records variable-length/object metadata without deserializing it.
+
+Compatibility decision: **incompatible for bounded normalization in this environment**. The logical semantics are present, but the selected representation does not permit incremental row reads, so a sample limit cannot prevent whole-file deserialization. No adapter is published and the source's precomputed wavelet/TLS features are not substituted for the native feature schema. The 36.1 GB raw PCAP archive remains intentionally excluded.
 
 ## ISCXVPN2016
 
-Metadata-only. The approximately 28 GB OpenVPN collection is intentionally not downloaded in this phase; access terms and smaller official representations remain under review.
+Metadata-only. The official publisher page, retrieved 2026-09-26, describes approximately 28 GB of full-packet PCAP plus ISCXFlowMeter CSV, with regular and VPN forms of Web Browsing, Email, Chat, Streaming, File Transfer, VoIP, and P2P. VPN collection used OpenVPN in UDP mode. The publisher makes the dataset available to researchers through a short reporting form and requires citation of the associated paper, but no CC/SPDX redistribution grant was identified. The full collection is intentionally not downloaded in this phase.
