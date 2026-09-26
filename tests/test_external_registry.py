@@ -38,8 +38,11 @@ class ExternalRegistryTest(unittest.TestCase):
              usb.artifacts[0].publisher_checksum.value),
             ("md5", "35a4aef78526440cd6e352de49c4daf2"),
         )
-        self.assertIsNone(usb.artifacts[0].local_verification.sha256)
-        self.assertEqual(usb.artifacts[0].local_verification.result, "not_downloaded")
+        self.assertEqual(
+            usb.artifacts[0].local_verification.sha256,
+            "8039945ffa3f22ff9443787dfbeaf74fd89d33cddd292dcaa6f7cc4b9fe2f54e",
+        )
+        self.assertEqual(usb.artifacts[0].local_verification.result, "verified")
 
         strongswan = registry.source("vpn_protocol_performance_2026")
         self.assertEqual(strongswan.doi, "10.5281/zenodo.21645499")
@@ -103,15 +106,24 @@ class ExternalRegistryTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 ExternalDatasetRegistry.load(path)
 
-    def test_registry_does_not_claim_uninspected_usb_or_vnat_schema(self):
+    def test_registry_records_inspected_usb_but_not_uninspected_vnat_schema(self):
         registry = ExternalDatasetRegistry.load(REGISTRY)
-        for source_id in ("usbvpn2022", "mit_ll_vnat"):
-            source = registry.source(source_id)
-            self.assertEqual(source.inspection.state, InspectionState.UNINSPECTED)
-            self.assertEqual(source.inspection.observed_formats, ())
-            self.assertEqual(source.inspection.observed_protocols, ())
-            self.assertEqual(source.inspection.observed_labels, ())
-            self.assertIsNone(source.inspection.adapter_id)
+        usb = registry.source("usbvpn2022")
+        self.assertEqual(usb.inspection.state, InspectionState.COMPATIBLE)
+        self.assertEqual(usb.inspection.observed_formats, ("zip", "json"))
+        self.assertEqual(usb.inspection.observed_protocols, ("l2tp_ipsec_natt",))
+        self.assertEqual(
+            usb.inspection.observed_labels,
+            ("mail", "meet", "non_streaming", "ssh", "streaming"),
+        )
+        self.assertIsNone(usb.inspection.adapter_id)
+
+        vnat = registry.source("mit_ll_vnat")
+        self.assertEqual(vnat.inspection.state, InspectionState.UNINSPECTED)
+        self.assertEqual(vnat.inspection.observed_formats, ())
+        self.assertEqual(vnat.inspection.observed_protocols, ())
+        self.assertEqual(vnat.inspection.observed_labels, ())
+        self.assertIsNone(vnat.inspection.adapter_id)
 
 
 if __name__ == "__main__":

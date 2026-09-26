@@ -13,20 +13,24 @@ sources:
       evidence_url: https://zenodo.org/records/7301756
       retrieved_at: "2026-09-26"
       redistribution_status: allowed
-    declared_protocols: []
+    declared_protocols: [l2tp_ipsec_natt]
     declared_formats: [zip]
     declared_labels: []
     intended_use: Inspect the actual L2TP-IPsec subset for packet-session external application-class validation.
-    acquisition_state: not_downloaded
+    acquisition_state: verified
     inspection:
-      state: uninspected
-      inspected_at: null
-      artifact_sha256: null
-      observed_formats: []
-      observed_protocols: []
-      observed_labels: []
+      state: compatible
+      inspected_at: "2026-09-26"
+      artifact_sha256: 8039945ffa3f22ff9443787dfbeaf74fd89d33cddd292dcaa6f7cc4b9fe2f54e
+      observed_formats: [zip, json]
+      observed_protocols: [l2tp_ipsec_natt]
+      observed_labels: [mail, meet, non_streaming, ssh, streaming]
       adapter_id: null
-      notes: []
+      notes:
+        - L2TP IPsec subset contains five JSON files and five top-level flow/session objects per inspected small class file.
+        - Each x_packets entry preserves timestamp_start/timestamp_end, signed byte length, IP header length, and packet count; signed bytes encode direction.
+        - UDP/4500 NAT-T observations are external-evaluation inputs, not native protocol-50 ESP PCAPs.
+        - Only explicit allowlisted label mappings may be normalized; non_streaming and ssh remain unmapped.
     artifacts:
       - artifact_id: usbvpn2022_archive
         filename: encrypted_vpn_dataset.zip
@@ -37,11 +41,14 @@ sources:
           algorithm: md5
           value: 35a4aef78526440cd6e352de49c4daf2
         local_verification:
-          actual_size_bytes: null
-          sha256: null
-          verified_at: null
-          result: not_downloaded
-    label_mappings: {}
+          actual_size_bytes: 811738498
+          sha256: 8039945ffa3f22ff9443787dfbeaf74fd89d33cddd292dcaa6f7cc4b9fe2f54e
+          verified_at: "2026-09-26T12:58:10.733181+00:00"
+          result: verified
+    label_mappings:
+      mail: email
+      meet: voip
+      streaming: video
 
   - source_id: vpn_protocol_performance_2026
     display_name: WireGuard, OpenVPN and IPsec (strongSwan) Dataset
@@ -60,16 +67,18 @@ sources:
     declared_formats: [zip, json, text, log]
     declared_labels: []
     intended_use: Catalog external protocol, configuration, SA, platform, and network-condition evidence; not application-class training.
-    acquisition_state: not_downloaded
+    acquisition_state: verified
     inspection:
-      state: uninspected
-      inspected_at: null
-      artifact_sha256: null
-      observed_formats: []
-      observed_protocols: []
+      state: catalog_only
+      inspected_at: "2026-09-26"
+      artifact_sha256: d3a6ec449e43ad9f776827c120a97686981a5d0ac8a197a45b789bd3e8470566
+      observed_formats: [zip, json, text, log]
+      observed_protocols: [strongswan_ipsec, openvpn, wireguard]
       observed_labels: []
-      adapter_id: null
-      notes: []
+      adapter_id: strongswan2026-catalog/v1
+      notes:
+        - 189 experiment directories; 63 observations per VPN implementation.
+        - Aggregate protocol/configuration/performance evidence only; no PCAP files or application-class labels observed.
     artifacts:
       - artifact_id: vpn_protocol_performance_2026_archive
         filename: wireguard-openvpn-ipsec-(strongswan)_dataset.zip
@@ -80,10 +89,10 @@ sources:
           algorithm: md5
           value: bca99ce9a6ad9a3e2ad03c9f0b63db48
         local_verification:
-          actual_size_bytes: null
-          sha256: null
-          verified_at: null
-          result: not_downloaded
+          actual_size_bytes: 4701066
+          sha256: d3a6ec449e43ad9f776827c120a97686981a5d0ac8a197a45b789bd3e8470566
+          verified_at: "2026-09-26T12:38:05.287767+00:00"
+          result: verified
     label_mappings: {}
 
   - source_id: mit_ll_vnat
