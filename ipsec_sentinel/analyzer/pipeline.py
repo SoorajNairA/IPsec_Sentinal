@@ -16,6 +16,12 @@ from ipsec_sentinel.analyzer.sa import reconstruct_security_associations
 
 
 def _base(path: Path) -> dict[str, Any]:
+    category_maximum = (
+        ("Cryptography", 30), ("Key Exchange / PFS", 25),
+        ("Security Association Hygiene", 15),
+        ("Replay / Protocol Protections", 15),
+        ("Metadata / Privacy Exposure", 15),
+    )
     return {
         "analysis_version": "1.0", "schema_id": ANALYSIS_SCHEMA_ID,
         "capture": {"path": str(path), "format": "UNKNOWN", "packet_count": 0,
@@ -52,7 +58,12 @@ def _base(path: Path) -> dict[str, Any]:
                                  "payload_decrypted": False, "reason": "analysis unavailable"},
         "evidence": [], "findings": [],
         "security_score": {"total": 0, "maximum": 100, "assessed_weight": 0,
-                           "unassessed_weight": 100, "categories": [],
+                           "unassessed_weight": 100, "categories": [
+                               {"name": name, "maximum_score": maximum,
+                                "achieved_score": 0, "assessed_weight": 0,
+                                "unassessed_weight": maximum, "deductions": []}
+                               for name, maximum in category_maximum
+                           ],
                            "method": "normalized over assessed evidence; UNKNOWN is not penalized"},
         "limitations": [],
     }

@@ -43,6 +43,16 @@ class AnalyzerAssessmentTest(unittest.TestCase):
         self.assertEqual(len(observations), 12)
         self.assertTrue(evidence)
 
+    def test_esp_direction_is_peer_normalized_when_reverse_packet_arrives_first(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "reverse-first.pcap"
+            write_pcap(path, [
+                (1, ethernet_ipv4("192.0.2.2", "192.0.2.1", 50, esp(2, 1))),
+                (2, ethernet_ipv4("192.0.2.1", "192.0.2.2", 50, esp(1, 1))),
+            ])
+            _, observations, _ = analyze_esp(parse_capture(path))
+        self.assertEqual([item.direction for item in observations], ["reverse", "forward"])
+
     def test_inference_is_unknown_for_insufficient_packets_or_missing_model(self) -> None:
         temporary, path = self._esp_capture(4)
         self.addCleanup(temporary.cleanup)
@@ -147,6 +157,7 @@ class AnalyzerAssessmentTest(unittest.TestCase):
             missing = analyze_capture(root / "missing.pcap")
             self.assertEqual(missing["summary"]["status"], "ERROR")
             self.assertEqual(missing["analysis_version"], "1.0")
+            self.assertEqual(len(missing["security_score"]["categories"]), 5)
             plain = root / "plain.pcap"
             write_pcap(plain, [(1, ethernet_ipv4("10.0.0.1", "10.0.0.2", 1, b"ping"))])
             result = analyze_capture(plain)

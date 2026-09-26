@@ -100,8 +100,7 @@ def analyze_ike(capture: ParsedCapture) -> tuple[dict[str, object], tuple[Eviden
         exchange = data[18]
         response = bool(data[19] & 0x20)
         exchanges.append({"packet_number": packet.number, "exchange_type": exchange, "response": response, "message_id": int.from_bytes(data[20:24], "big")})
-        if major == 2:
-            result["version"] = "IKEv2"
+        result["version"] = f"IKEv{major}"
         result["initiator_spi"] = data[:8].hex()
         result["responder_spi"] = data[8:16].hex()
         if exchange == 34 and response:

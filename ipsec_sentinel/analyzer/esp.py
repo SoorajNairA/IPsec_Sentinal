@@ -28,7 +28,7 @@ def analyze_esp(capture: ParsedCapture) -> tuple[dict[str, object], tuple[EspObs
     pair_counts = Counter(tuple(sorted((packet.source, packet.destination))) for packet in esp_packets)
     peer_pair = pair_counts.most_common(1)[0][0]
     selected = [packet for packet in esp_packets if tuple(sorted((packet.source, packet.destination))) == peer_pair]
-    first_direction = (selected[0].source, selected[0].destination)
+    first_direction = (peer_pair[0], peer_pair[1])
     first_timestamp = selected[0].timestamp_ns
     observations = tuple(EspObservation(
         (packet.timestamp_ns - first_timestamp) / 1_000_000_000,

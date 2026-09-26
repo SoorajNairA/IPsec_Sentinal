@@ -4,7 +4,7 @@ from typing import Any
 
 
 RULE_IDS = (
-    "IPSEC-IKE-001", "IPSEC-IKE-002", "IPSEC-CRYPTO-001",
+    "IPSEC-IKE-001", "IPSEC-IKE-002", "IPSEC-IKE-003", "IPSEC-CRYPTO-001",
     "IPSEC-CRYPTO-002", "IPSEC-CRYPTO-003", "IPSEC-INTEGRITY-001",
     "IPSEC-DH-001", "IPSEC-DH-002", "IPSEC-PFS-001", "IPSEC-PFS-002",
     "IPSEC-PFS-003", "IPSEC-REKEY-001", "IPSEC-REPLAY-001",
@@ -43,8 +43,12 @@ def assess_security(context: dict[str, Any]) -> tuple[list[dict[str, Any]], dict
     if version == "IKEv2":
         findings.append(_finding("IPSEC-IKE-001", "Modern IKE version", "INFO", "PASS", "OBSERVED", "IKEv2 is present.", "The observed header identifies IKEv2.", "No legacy-version concern was observed.", "Continue using IKEv2.", ["ev-ike-version-001"]))
         assessed["Replay / Protocol Protections"] += 5
+    elif version == "IKEv1":
+        assessed["Replay / Protocol Protections"] += 5
+        findings.append(_finding("IPSEC-IKE-002", "Legacy IKE version", "HIGH", "FAIL", "OBSERVED", "IKEv1 was observed.", "The packet header identifies legacy IKEv1 rather than IKEv2.", "Legacy negotiation has a larger compatibility and attack surface.", "Migrate the peers to IKEv2.", ["ev-ike-version-001"]))
+        deductions["Replay / Protocol Protections"].append({"rule_id": "IPSEC-IKE-002", "points": 5, "evidence_ids": ["ev-ike-version-001"]})
     else:
-        findings.append(_finding("IPSEC-IKE-002", "IKE version unassessed", "INFO", "UNKNOWN", "UNKNOWN", "IKE version could not be established.", "The capture lacks sufficient clear IKE header evidence.", "Protocol-version posture is unassessed.", "Provide IKE establishment packets.", []))
+        findings.append(_finding("IPSEC-IKE-003", "IKE version unassessed", "INFO", "UNKNOWN", "UNKNOWN", "IKE version could not be established.", "The capture lacks sufficient clear IKE header evidence.", "Protocol-version posture is unassessed.", "Provide IKE establishment packets.", []))
 
     encryption = ike.get("encryption", {})
     cipher = encryption.get("normalized", "UNKNOWN")

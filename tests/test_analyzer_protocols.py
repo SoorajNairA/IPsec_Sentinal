@@ -6,6 +6,7 @@ import unittest
 from ipsec_sentinel.analyzer.capture import parse_capture
 from ipsec_sentinel.analyzer.ike import analyze_ike, normalize_transform
 from ipsec_sentinel.analyzer.protocols import analyze_protocols
+from ipsec_sentinel.analyzer.rules import assess_security
 from ipsec_sentinel.analyzer.sa import reconstruct_security_associations
 from tests.pcap_helpers import ethernet_ipv4, write_pcap
 
@@ -75,6 +76,26 @@ class AnalyzerProtocolTest(unittest.TestCase):
         self.assertEqual(result["dh_group"]["normalized"], "ECP-384")
         self.assertEqual(result["selection_basis"], "IKE_SA_INIT responder SA payload")
         self.assertEqual({item.provenance for item in evidence}, {"OBSERVED"})
+
+    def test_ikev1_is_retained_for_legacy_security_rule(self) -> None:
+        payload = bytearray(28)
+        payload[0:8] = b"INITSPI1"
+        payload[17] = 0x10
+        payload[18] = 2
+        payload[24:28] = (28).to_bytes(4, "big")
+        capture = self._capture([
+            (1, ethernet_ipv4("192.0.2.1", "192.0.2.2", 17, udp(500, 500, bytes(payload))))
+        ])
+        result, _ = analyze_ike(capture)
+        self.assertEqual(result["version"], "IKEv1")
+        findings, score = assess_security({
+            "ike": result, "pfs": {"state": "unknown", "provenance": "UNKNOWN", "evidence_ids": []},
+            "security_associations": [], "esp": {"packet_count": 0},
+            "traffic_intelligence": {"state": "UNKNOWN"}, "controlled_evidence": {"available": False},
+        })
+        legacy = next(item for item in findings if item["rule_id"] == "IPSEC-IKE-002")
+        self.assertEqual(legacy["severity"], "HIGH")
+        self.assertLess(score["total"], 100)
 
     def test_algorithm_normalization(self) -> None:
         self.assertEqual(normalize_transform(1, 20, 128), ("AES_GCM_16_128", "AES-128-GCM"))
