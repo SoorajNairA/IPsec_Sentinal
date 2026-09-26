@@ -109,7 +109,7 @@ class ExternalRegistryTest(unittest.TestCase):
     def test_registry_records_inspected_usb_but_not_uninspected_vnat_schema(self):
         registry = ExternalDatasetRegistry.load(REGISTRY)
         usb = registry.source("usbvpn2022")
-        self.assertEqual(usb.inspection.state, InspectionState.COMPATIBLE)
+        self.assertEqual(usb.inspection.state, InspectionState.INCOMPATIBLE)
         self.assertEqual(usb.inspection.observed_formats, ("zip", "json"))
         self.assertEqual(usb.inspection.observed_protocols, ("l2tp_ipsec_natt",))
         self.assertEqual(
