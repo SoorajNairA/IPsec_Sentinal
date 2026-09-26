@@ -12,9 +12,6 @@ from typing import Any
 from uuid import uuid4
 from zipfile import ZipFile, ZipInfo
 
-import h5py
-import numpy as np
-
 from ipsec_sentinel.artifacts import write_json_atomic
 from ipsec_sentinel.external.acquire import VerifiedArtifact
 from ipsec_sentinel.external.registry import SourceRecord
@@ -132,6 +129,8 @@ def safe_extract_zip(
 
 
 def _json_value(value: Any) -> Any:
+    import numpy as np
+
     if isinstance(value, bytes):
         return value.decode("utf-8", errors="replace")
     if isinstance(value, np.void) and value.dtype.names:
@@ -148,6 +147,8 @@ def _json_value(value: Any) -> Any:
 
 
 def _inspect_hdf5(path: Path) -> tuple[list[dict[str, object]], dict[str, str], list[str]]:
+    import h5py
+
     structure: list[dict[str, object]] = []
     fields: set[str] = set()
     with h5py.File(path, "r") as source:
