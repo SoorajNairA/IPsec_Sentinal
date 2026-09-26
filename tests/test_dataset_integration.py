@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import subprocess
 from tempfile import TemporaryDirectory
 import unittest
@@ -19,6 +20,20 @@ DATASET_INTEGRATION_ENABLED = (
     and hasattr(os, "geteuid")
     and os.geteuid() == 0
 )
+
+
+def contains_udp_4500_endpoint(tcpdump_text: str) -> bool:
+    return re.search(r"\b(?:\d{1,3}\.){3}\d{1,3}\.4500\b", tcpdump_text) is not None
+
+
+class CaptureRoleTextTest(unittest.TestCase):
+    def test_udp_4500_detection_ignores_fractional_timestamp(self) -> None:
+        self.assertFalse(contains_udp_4500_endpoint(
+            "19:46:03.450012 IP 192.0.2.1 > 192.0.2.2: ESP(spi=0x1), length 88"
+        ))
+        self.assertTrue(contains_udp_4500_endpoint(
+            "19:46:03.123456 IP 192.0.2.1.4500 > 192.0.2.2.4500: UDP-encap: ESP"
+        ))
 
 
 def write_one_slot_config(
@@ -129,7 +144,7 @@ class DatasetIntegrationTest(unittest.TestCase):
         self.assertIn("esp", full)
         self.assertIn("esp", ml)
         self.assertNotIn("isakmp", ml)
-        self.assertNotIn(".4500", ml)
+        self.assertFalse(contains_udp_4500_endpoint(ml))
 
         rekey_log = (run_dir / "pfs-rekey.log").read_text(
             encoding="utf-8", errors="replace"
