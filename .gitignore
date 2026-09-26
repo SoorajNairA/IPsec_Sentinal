@@ -4,3 +4,6 @@ dataset/
 __pycache__/
 *.pyc
 .venv/
+configs/external-datasets.local.yaml
+external-data/
+.external-data/

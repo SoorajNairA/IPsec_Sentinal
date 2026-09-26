@@ -1,0 +1,2 @@
+schema_version: ipsec-sentinel.external-config/v1
+external_data_root: /home/black/ipsec-sentinel-external-datasets
