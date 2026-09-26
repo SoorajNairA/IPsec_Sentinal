@@ -1,0 +1,168 @@
+schema_version: ipsec-sentinel.external-registry/v1
+sources:
+  - source_id: usbvpn2022
+    display_name: Encrypted VPN Dataset (USBVPN2022)
+    version: "2022-11-04"
+    doi: 10.5281/zenodo.7301756
+    landing_url: https://zenodo.org/records/7301756
+    citation: "M. Naas and J. Fesl, A novel dataset for encrypted virtual private network traffic analysis, Data in Brief 47 (2023) 108945."
+    publisher: Zenodo
+    published_at: "2022-11-04"
+    license:
+      name: CC BY 4.0
+      evidence_url: https://zenodo.org/records/7301756
+      retrieved_at: "2026-09-26"
+      redistribution_status: allowed
+    declared_protocols: []
+    declared_formats: [zip]
+    declared_labels: []
+    intended_use: Inspect the actual L2TP-IPsec subset for packet-session external application-class validation.
+    acquisition_state: not_downloaded
+    inspection:
+      state: uninspected
+      inspected_at: null
+      artifact_sha256: null
+      observed_formats: []
+      observed_protocols: []
+      observed_labels: []
+      adapter_id: null
+      notes: []
+    artifacts:
+      - artifact_id: usbvpn2022_archive
+        filename: encrypted_vpn_dataset.zip
+        download_url: https://zenodo.org/api/records/7301756/files/encrypted_vpn_dataset.zip/content
+        selected: true
+        published_size_bytes: 811738498
+        publisher_checksum:
+          algorithm: md5
+          value: 35a4aef78526440cd6e352de49c4daf2
+        local_verification:
+          actual_size_bytes: null
+          sha256: null
+          verified_at: null
+          result: not_downloaded
+    label_mappings: {}
+
+  - source_id: vpn_protocol_performance_2026
+    display_name: WireGuard, OpenVPN and IPsec (strongSwan) Dataset
+    version: "2026"
+    doi: 10.5281/zenodo.21645499
+    landing_url: https://zenodo.org/records/21645499
+    citation: "R. Forsung, R. Pirmagomedov, A. Mezina, J. Nurmi, and A. Ometov, WireGuard, OpenVPN and IPsec (strongSwan) dataset, Zenodo (2026)."
+    publisher: Zenodo
+    published_at: "2026"
+    license:
+      name: CC BY 4.0
+      evidence_url: https://zenodo.org/records/21645499
+      retrieved_at: "2026-09-26"
+      redistribution_status: allowed
+    declared_protocols: [wireguard, openvpn, strongswan_ipsec]
+    declared_formats: [zip, json, text, log]
+    declared_labels: []
+    intended_use: Catalog external protocol, configuration, SA, platform, and network-condition evidence; not application-class training.
+    acquisition_state: not_downloaded
+    inspection:
+      state: uninspected
+      inspected_at: null
+      artifact_sha256: null
+      observed_formats: []
+      observed_protocols: []
+      observed_labels: []
+      adapter_id: null
+      notes: []
+    artifacts:
+      - artifact_id: vpn_protocol_performance_2026_archive
+        filename: wireguard-openvpn-ipsec-(strongswan)_dataset.zip
+        download_url: https://zenodo.org/api/records/21645499/files/wireguard-openvpn-ipsec-(strongswan)_dataset.zip/content
+        selected: true
+        published_size_bytes: 4701066
+        publisher_checksum:
+          algorithm: md5
+          value: bca99ce9a6ad9a3e2ad03c9f0b63db48
+        local_verification:
+          actual_size_bytes: null
+          sha256: null
+          verified_at: null
+          result: not_downloaded
+    label_mappings: {}
+
+  - source_id: mit_ll_vnat
+    display_name: MIT Lincoln Laboratory VPN/Non-VPN Network Application Traffic Dataset (VNAT)
+    version: release-1
+    doi: null
+    landing_url: https://www.ll.mit.edu/r-d/datasets/vpnnonvpn-network-application-traffic-dataset-vnat
+    citation: "MIT Lincoln Laboratory, VPN/Non-VPN Network Application Traffic Dataset (VNAT)."
+    publisher: MIT Lincoln Laboratory
+    published_at: unknown
+    license:
+      name: Terms not explicitly identified during initial discovery
+      evidence_url: https://www.ll.mit.edu/r-d/datasets/vpnnonvpn-network-application-traffic-dataset-vnat
+      retrieved_at: "2026-09-26"
+      redistribution_status: unknown
+    declared_protocols: [vpn_unspecified, non_vpn]
+    declared_formats: [hdf5]
+    declared_labels: [Streaming, VoIP, Chat, C2, File Transfer]
+    intended_use: Inspect the packet dataframe for compatible VPN-session external evaluation without acquiring raw PCAP.
+    acquisition_state: not_downloaded
+    inspection:
+      state: uninspected
+      inspected_at: null
+      artifact_sha256: null
+      observed_formats: []
+      observed_protocols: []
+      observed_labels: []
+      adapter_id: null
+      notes: []
+    artifacts:
+      - artifact_id: mit_ll_vnat_dataframe
+        filename: VNAT_Dataframe_release_1.h5
+        download_url: https://archive.ll.mit.edu/datasets/vnat/VNAT_Dataframe_release_1.h5
+        selected: true
+        published_size_bytes: 1045436008
+        publisher_checksum: null
+        local_verification:
+          actual_size_bytes: null
+          sha256: null
+          verified_at: null
+          result: not_downloaded
+    label_mappings:
+      Streaming: video
+      VoIP: voip
+      Chat: messaging
+      File Transfer: file_transfer
+
+  - source_id: iscxvpn2016
+    display_name: ISCXVPN2016
+    version: "2016"
+    doi: null
+    landing_url: https://www.unb.ca/cic/datasets/vpn.html
+    citation: "G. Draper-Gil et al., Characterization of Encrypted and VPN Traffic using Time-related Features, ICISSP (2016)."
+    publisher: Canadian Institute for Cybersecurity, University of New Brunswick
+    published_at: "2016"
+    license:
+      name: Public for researchers with citation requirement; no CC/SPDX grant identified
+      evidence_url: https://www.unb.ca/cic/datasets/vpn.html
+      retrieved_at: "2026-09-26"
+      redistribution_status: unknown
+    declared_protocols: [openvpn_udp]
+    declared_formats: [pcap, flow_csv]
+    declared_labels: [Web Browsing, Email, Chat, Streaming, File Transfer, VoIP, P2P]
+    intended_use: Metadata-only cross-VPN validation candidate unless a reasonably sized official representation becomes available.
+    acquisition_state: metadata_only
+    inspection:
+      state: uninspected
+      inspected_at: null
+      artifact_sha256: null
+      observed_formats: []
+      observed_protocols: []
+      observed_labels: []
+      adapter_id: null
+      notes: [Full approximately 28 GB collection intentionally not acquired.]
+    artifacts: []
+    label_mappings:
+      Web Browsing: web
+      Email: email
+      Chat: messaging
+      Streaming: video
+      File Transfer: file_transfer
+      VoIP: voip
