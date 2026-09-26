@@ -19,7 +19,7 @@ sources:
     intended_use: Inspect the actual L2TP-IPsec subset for packet-session external application-class validation.
     acquisition_state: verified
     inspection:
-      state: compatible
+      state: incompatible
       inspected_at: "2026-09-26"
       artifact_sha256: 8039945ffa3f22ff9443787dfbeaf74fd89d33cddd292dcaa6f7cc4b9fe2f54e
       observed_formats: [zip, json]
@@ -27,10 +27,12 @@ sources:
       observed_labels: [mail, meet, non_streaming, ssh, streaming]
       adapter_id: null
       notes:
-        - L2TP IPsec subset contains five JSON files and five top-level flow/session objects per inspected small class file.
+        - L2TP IPsec subset contains five JSON files with top-level flow/session objects.
         - Each x_packets entry preserves timestamp_start/timestamp_end, signed byte length, IP header length, and packet count; signed bytes encode direction.
+        - Mapped UDP/4500 flows contain rows that aggregate multiple packets, so individual packet sizes and timing cannot be reconstructed without invention.
+        - Clean meet rows are unrelated ICMP flows, not the mapped NAT-T workload.
         - UDP/4500 NAT-T observations are external-evaluation inputs, not native protocol-50 ESP PCAPs.
-        - Only explicit allowlisted label mappings may be normalized; non_streaming and ssh remain unmapped.
+        - No packet-session adapter is available; non_streaming and ssh also remain unmapped.
     artifacts:
       - artifact_id: usbvpn2022_archive
         filename: encrypted_vpn_dataset.zip
