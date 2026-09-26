@@ -19,7 +19,7 @@ class AnalyzerContractTest(unittest.TestCase):
             self.assertEqual(result["schema_id"], ANALYSIS_SCHEMA_ID)
             self.assertEqual(set((
                 "analysis_version", "schema_id", "capture", "summary", "peers",
-                "protocols", "ike", "security_associations", "esp",
+                "protocols", "ike", "controlled_evidence", "security_associations", "esp",
                 "traffic_intelligence", "evidence", "findings", "security_score",
                 "limitations",
             )) - result.keys(), set())

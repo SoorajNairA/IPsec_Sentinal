@@ -120,6 +120,27 @@ class AnalyzerAssessmentTest(unittest.TestCase):
         self.assertEqual(weak["evidence_ids"], ["ev-weak"])
         self.assertLess(score["total"], 100)
 
+    def test_controlled_observation_contradiction_is_flagged_only_when_available(self) -> None:
+        context = {
+            "ike": {
+                "version": "IKEv2",
+                "encryption": {"normalized": "AES-128-GCM", "provenance": "OBSERVED", "evidence_id": "ev-cipher"},
+                "integrity": {"normalized": "UNKNOWN", "provenance": "UNKNOWN"},
+                "dh_group": {"normalized": "UNKNOWN", "provenance": "UNKNOWN"},
+            },
+            "controlled_evidence": {
+                "available": True,
+                "observed": {"normalized_esp": {"encryption": "AES-256-GCM"}},
+            },
+            "pfs": {"state": "unknown", "provenance": "UNKNOWN", "evidence_ids": []},
+            "security_associations": [], "esp": {"packet_count": 0},
+            "traffic_intelligence": {"state": "UNKNOWN"},
+        }
+        findings, _ = assess_security(context)
+        mismatch = next(item for item in findings if item["rule_id"] == "IPSEC-EVIDENCE-001")
+        self.assertEqual(mismatch["severity"], "MEDIUM")
+        self.assertEqual(set(mismatch["evidence_ids"]), {"ev-cipher", "ev-lab-config-001"})
+
     def test_pipeline_returns_structured_non_ipsec_and_error_results(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)

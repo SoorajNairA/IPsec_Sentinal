@@ -8,6 +8,7 @@ from ipsec_sentinel.analyzer.contract import ANALYSIS_SCHEMA_ID, validate_analys
 from ipsec_sentinel.analyzer.esp import analyze_esp
 from ipsec_sentinel.analyzer.ike import analyze_ike
 from ipsec_sentinel.analyzer.intelligence import infer_traffic
+from ipsec_sentinel.analyzer.lab import load_controlled_evidence
 from ipsec_sentinel.analyzer.models import Evidence
 from ipsec_sentinel.analyzer.protocols import analyze_protocols
 from ipsec_sentinel.analyzer.rules import assess_security
@@ -34,6 +35,7 @@ def _base(path: Path) -> dict[str, Any]:
                 "prf": {"raw": "UNKNOWN", "normalized": "UNKNOWN", "provenance": "UNKNOWN"},
                 "dh_group": {"raw": "UNKNOWN", "normalized": "UNKNOWN", "provenance": "UNKNOWN"},
                 "selection_basis": "UNKNOWN", "traffic_selectors": {"value": "UNKNOWN", "provenance": "UNKNOWN"}},
+        "controlled_evidence": {"available": False, "source": "none"},
         "security_associations": [],
         "pfs": {"state": "unknown", "provenance": "UNKNOWN", "evidence_ids": [],
                 "explanation": "Insufficient CHILD-SA DH evidence."},
@@ -75,6 +77,7 @@ def analyze_capture(
     *,
     model_dir: Path = Path("model"),
     low_confidence_threshold: float = 0.60,
+    evidence_dir: Path | None = None,
 ) -> dict[str, Any]:
     path = Path(path)
     result = _base(path)
@@ -94,7 +97,9 @@ def analyze_capture(
         observations, model_dir,
         low_confidence_threshold=low_confidence_threshold,
     )
-    evidence: list[Evidence] = [*protocol_evidence, *ike_evidence, *sa_evidence, *esp_evidence]
+    sidecar_dir = path.parent if evidence_dir is None else Path(evidence_dir)
+    controlled, controlled_pfs, controlled_items = load_controlled_evidence(sidecar_dir, path.name)
+    evidence: list[Evidence] = [*protocol_evidence, *ike_evidence, *sa_evidence, *esp_evidence, *controlled_items]
     evidence_ids = {item.id for item in evidence}
     for field, identifier in (
         ("encryption", "ev-ike-encryption-001"),
@@ -128,9 +133,12 @@ def analyze_capture(
                     "message": "Analysis completed without payload decryption."},
         "peers": _infer_peers(capture, protocols["peer_pairs"]),
         "protocols": protocols, "ike": ike,
+        "controlled_evidence": controlled,
         "security_associations": associations, "esp": esp,
         "traffic_intelligence": traffic,
     })
+    if controlled_pfs is not None:
+        result["pfs"] = controlled_pfs
     findings, score = assess_security(result)
     result["findings"] = findings
     result["security_score"] = score

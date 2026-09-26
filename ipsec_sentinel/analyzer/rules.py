@@ -9,6 +9,7 @@ RULE_IDS = (
     "IPSEC-DH-001", "IPSEC-DH-002", "IPSEC-PFS-001", "IPSEC-PFS-002",
     "IPSEC-PFS-003", "IPSEC-REKEY-001", "IPSEC-REPLAY-001",
     "IPSEC-METADATA-001", "IPSEC-ML-001",
+    "IPSEC-EVIDENCE-001",
 )
 
 
@@ -96,6 +97,17 @@ def assess_security(context: dict[str, Any]) -> tuple[list[dict[str, Any]], dict
         assessed["Security Association Hygiene"] += 10
         ev_ids = [item.get("rekey_evidence_id") for item in rekeys if item.get("rekey_evidence_id")]
         findings.append(_finding("IPSEC-REKEY-001", "ESP SPI replacement observed", "INFO", "PASS", "DERIVED", "An ESP SA replacement sequence was reconstructed.", "A later SPI superseded an earlier SPI in the same direction.", "SA renewal behavior is present, but does not itself prove PFS.", "Retain healthy rekey policy.", ev_ids))
+
+    controlled = context.get("controlled_evidence", {})
+    if controlled.get("available"):
+        runtime_cipher = controlled.get("observed", {}).get("normalized_esp", {}).get("encryption", "UNKNOWN")
+        packet_cipher = encryption.get("normalized", "UNKNOWN")
+        if runtime_cipher != "UNKNOWN" and packet_cipher != "UNKNOWN":
+            assessed["Security Association Hygiene"] += 5
+            if runtime_cipher != packet_cipher:
+                mismatch_ids = [identifier for identifier in (encryption.get("evidence_id"), "ev-lab-config-001") if identifier]
+                findings.append(_finding("IPSEC-EVIDENCE-001", "Packet and controlled runtime evidence disagree", "MEDIUM", "FAIL", "DERIVED", f"Packet evidence reports {packet_cipher}; controlled runtime reports {runtime_cipher}.", "Two independently sourced observations identify different selected encryption transforms.", "The capture and supplied run artifacts may not represent the same session or a parser may be incomplete.", "Verify artifact pairing and negotiation evidence before relying on the assessment.", mismatch_ids))
+                deductions["Security Association Hygiene"].append({"rule_id": "IPSEC-EVIDENCE-001", "points": 5, "evidence_ids": mismatch_ids})
 
     findings.append(_finding("IPSEC-REPLAY-001", "Replay protection unassessed", "INFO", "UNKNOWN", "UNKNOWN", "Replay-window enforcement is not visible in a passive capture.", "Packet sequence values do not prove receiver enforcement.", "Replay-protection posture remains unassessed.", "Use endpoint runtime evidence for verification.", []))
     assessed["Metadata / Privacy Exposure"] = 15

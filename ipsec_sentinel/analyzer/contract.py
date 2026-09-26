@@ -8,7 +8,7 @@ from ipsec_sentinel.analyzer.models import PROVENANCE
 ANALYSIS_SCHEMA_ID = "ipsec-sentinel.analysis/v1"
 REQUIRED_FIELDS = (
     "analysis_version", "schema_id", "capture", "summary", "peers", "protocols",
-    "ike", "security_associations", "esp", "traffic_intelligence", "evidence",
+    "ike", "controlled_evidence", "security_associations", "esp", "traffic_intelligence", "evidence",
     "findings", "security_score", "limitations",
 )
 
