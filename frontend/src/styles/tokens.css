@@ -1,0 +1,39 @@
+:root {
+  color-scheme: dark;
+  --ink-950: #080a0d;
+  --ink-925: #0b0e12;
+  --ink-900: #0e1217;
+  --ink-850: #12171d;
+  --ink-800: #171d24;
+  --line-subtle: rgba(181, 201, 218, 0.11);
+  --line-strong: rgba(181, 201, 218, 0.2);
+  --text-primary: #f1efe8;
+  --text-secondary: #aeb8c1;
+  --text-tertiary: #77838e;
+  --protocol: #85d7ee;
+  --protocol-strong: #a8e6f5;
+  --verified: #78c9a5;
+  --caution: #d8a75d;
+  --risk: #e2776d;
+  --unknown: #87919a;
+  --focus: #b3e8f4;
+  --font-sans: 'Inter Variable', Inter, ui-sans-serif, system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', 'SFMono-Regular', Consolas, monospace;
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+  --radius-sm: 0.45rem;
+  --radius-md: 0.75rem;
+  --radius-lg: 1rem;
+  --shadow-deep: 0 24px 70px rgba(0, 0, 0, 0.38);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+}
+
