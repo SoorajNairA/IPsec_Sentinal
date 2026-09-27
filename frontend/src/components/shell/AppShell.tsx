@@ -2,6 +2,7 @@ import { Activity, RotateCcw } from 'lucide-react'
 import { Outlet } from 'react-router-dom'
 
 import { useAnalysis } from '../../app/AnalysisContext'
+import { EvidenceDrawer } from '../evidence/EvidenceDrawer'
 import { Navigation } from './Navigation'
 
 export function AppShell() {
@@ -19,6 +20,7 @@ export function AppShell() {
       </header>
       <Navigation />
       <main className="workspace-main"><Outlet /></main>
+      <EvidenceDrawer />
     </div>
   )
 }

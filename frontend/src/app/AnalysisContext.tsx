@@ -1,5 +1,5 @@
 /* oxlint-disable react/only-export-components -- provider contract intentionally co-locates its hook and public state types */
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from 'react'
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 
 import { parseAnalysisEnvelope } from '../lib/analysis-contract/load'
@@ -63,6 +63,7 @@ interface AnalysisContextValue {
   stageIndex: number
   error: { code: string; message: string } | null
   selectedEvidenceId: string | null
+  evidenceRequest: { ids: string[]; valueLabel?: string } | null
   languageMode: LanguageMode
   openDemoChooser: () => Promise<void>
   closeDemoChooser: () => void
@@ -71,6 +72,8 @@ interface AnalysisContextValue {
   reset: () => void
   navigate: (view: AnalysisView) => void
   selectEvidence: (id: string | null) => void
+  inspectEvidence: (ids: readonly string[], valueLabel?: string) => void
+  closeEvidence: () => void
   setLanguageMode: (mode: LanguageMode) => void
 }
 
@@ -114,7 +117,9 @@ export function AnalysisProvider({
   const [stageIndex, setStageIndex] = useState(0)
   const [error, setError] = useState<{ code: string; message: string } | null>(null)
   const [selectedEvidenceId, selectEvidence] = useState<string | null>(null)
+  const [evidenceRequest, setEvidenceRequest] = useState<{ ids: string[]; valueLabel?: string } | null>(null)
   const [languageMode, setLanguageMode] = useState<LanguageMode>('PLAIN')
+  const evidenceTrigger = useRef<HTMLElement | null>(null)
 
   useEffect(() => {
     if (status !== 'ANALYZING') return undefined
@@ -124,11 +129,19 @@ export function AnalysisProvider({
     return () => window.clearInterval(timer)
   }, [status])
 
+  useEffect(() => {
+    if (evidenceRequest === null && evidenceTrigger.current) {
+      evidenceTrigger.current.focus()
+      evidenceTrigger.current = null
+    }
+  }, [evidenceRequest])
+
   const beginAnalysis = useCallback(() => {
     setStatus('ANALYZING')
     setStageIndex(0)
     setError(null)
     selectEvidence(null)
+    setEvidenceRequest(null)
   }, [])
 
   const acceptEnvelope = useCallback((input: unknown) => {
@@ -188,12 +201,20 @@ export function AnalysisProvider({
     setError(null)
     setStageIndex(0)
     selectEvidence(null)
+    setEvidenceRequest(null)
     routerNavigate('/')
   }, [routerNavigate])
 
   const navigate = useCallback((view: AnalysisView) => {
     routerNavigate(`/analysis/${view}`)
   }, [routerNavigate])
+
+  const inspectEvidence = useCallback((ids: readonly string[], valueLabel?: string) => {
+    evidenceTrigger.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setEvidenceRequest({ ids: [...ids], ...(valueLabel ? { valueLabel } : {}) })
+  }, [])
+
+  const closeEvidence = useCallback(() => setEvidenceRequest(null), [])
 
   const value = useMemo<AnalysisContextValue>(() => ({
     status,
@@ -202,6 +223,7 @@ export function AnalysisProvider({
     stageIndex,
     error,
     selectedEvidenceId,
+    evidenceRequest,
     languageMode,
     openDemoChooser,
     closeDemoChooser,
@@ -210,10 +232,12 @@ export function AnalysisProvider({
     reset,
     navigate,
     selectEvidence,
+    inspectEvidence,
+    closeEvidence,
     setLanguageMode,
   }), [
-    status, envelope, demos, stageIndex, error, selectedEvidenceId, languageMode,
-    openDemoChooser, closeDemoChooser, loadDemo, analyzeFile, reset, navigate,
+    status, envelope, demos, stageIndex, error, selectedEvidenceId, evidenceRequest, languageMode,
+    openDemoChooser, closeDemoChooser, loadDemo, analyzeFile, reset, navigate, inspectEvidence, closeEvidence,
   ])
 
   return <AnalysisContext.Provider value={value}>{children}</AnalysisContext.Provider>
