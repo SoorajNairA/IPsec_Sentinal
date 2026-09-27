@@ -21,6 +21,19 @@ class Action:
         self.stop()
 
 
+class SnapshotCapture(Action):
+    def snapshot(self, destination: Path) -> Path:
+        self.observed.append(f"snapshot:{destination.name}")
+        destination.write_bytes(b"snapshot")
+        return destination
+
+
+class Pair(Action):
+    def list_sas(self) -> dict[str, str]:
+        self.observed.append("list_sas")
+        return {"gateway-a": "a", "gateway-b": "b"}
+
+
 class SecureSessionTest(unittest.TestCase):
     def test_dataset_and_phase_one_primary_capture_names_do_not_overlap_semantics(self) -> None:
         with TemporaryDirectory() as directory:
@@ -72,6 +85,91 @@ class SecureSessionTest(unittest.TestCase):
             session.cleanup()
             self.assertEqual(observed.count("capture"), 2)
             self.assertEqual(observed.count("topology"), 2)
+
+    def test_capture_snapshot_delegates_to_running_primary_capture(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            observed: list[str] = []
+            session = SecureSession(
+                root / "run", StringIO(), primary_capture_name="full-evidence.pcap"
+            )
+            session.captures = {
+                "primary": SnapshotCapture("primary", observed),
+            }
+
+            destination = root / "snapshot.pcap"
+            result = session.capture_snapshot(destination)
+
+            self.assertEqual(result, destination)
+            self.assertEqual(destination.read_bytes(), b"snapshot")
+            self.assertEqual(observed, ["snapshot:snapshot.pcap"])
+
+    def test_refresh_sas_updates_session_without_waiting_or_restarting(self) -> None:
+        with TemporaryDirectory() as directory:
+            observed: list[str] = []
+            session = SecureSession(
+                Path(directory), StringIO(), primary_capture_name="full-evidence.pcap"
+            )
+            session.pair = Pair("pair_stop", observed)
+
+            result = session.refresh_sas()
+
+            self.assertEqual(result, {"gateway-a": "a", "gateway-b": "b"})
+            self.assertEqual(session.sas, result)
+            self.assertEqual(observed, ["list_sas"])
+
+    def test_stop_captures_is_idempotent_and_does_not_stop_daemons(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "runtime"
+            runtime.mkdir()
+            (root / "run").mkdir()
+            observed: list[str] = []
+            session = SecureSession(
+                root / "run", StringIO(), primary_capture_name="full-evidence.pcap"
+            )
+            session.runtime_dir = runtime
+            session.temporary_pcaps = {
+                name: runtime / f"{name}.pcap"
+                for name in ("primary", "gateway-a", "gateway-b")
+            }
+            session.destinations = {
+                name: root / "run" / f"{name}.pcap"
+                for name in ("primary", "gateway-a", "gateway-b")
+            }
+            for path in session.temporary_pcaps.values():
+                path.write_bytes(b"pcap")
+            session.destinations["primary"] = session.primary_destination
+            session.captures = {
+                name: Action(f"stop:{name}", observed)
+                for name in ("primary", "gateway-a", "gateway-b")
+            }
+            session.pair = Pair("daemon_stop", observed)
+
+            session.stop_captures()
+            first_ended_at = session.capture_ended_at
+            session.stop_captures()
+
+            self.assertGreater(first_ended_at, 0)
+            self.assertEqual(session.capture_ended_at, first_ended_at)
+            self.assertEqual(
+                observed,
+                ["stop:primary", "stop:gateway-a", "stop:gateway-b"],
+            )
+            self.assertNotIn("daemon_stop", observed)
+            self.assertTrue(session.primary_destination.is_file())
+
+    def test_capture_snapshot_does_not_change_evidence_completion_rules(self) -> None:
+        with TemporaryDirectory() as directory:
+            session = SecureSession(
+                Path(directory), StringIO(), primary_capture_name="full-evidence.pcap"
+            )
+            session.captures = {
+                "primary": SnapshotCapture("primary", []),
+            }
+            session.capture_snapshot(Path(directory) / "snapshot.pcap")
+            with self.assertRaisesRegex(RuntimeError, "evidence is incomplete"):
+                session.evidence()
 
 
 if __name__ == "__main__":

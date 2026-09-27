@@ -103,6 +103,7 @@ class SecureSession:
         self.capture_evidence: CaptureEvidence | None = None
         self.capture_started_at = 0.0
         self.capture_ended_at = 0.0
+        self._captures_finalized = False
 
     def preflight(self) -> None:
         if os.geteuid() != 0:
@@ -145,6 +146,7 @@ class SecureSession:
         self.runtime_dir.mkdir(parents=True, exist_ok=True, mode=0o700)
         os.chmod(self.runtime_dir, 0o700)
         self.capture_started_at = time()
+        self._captures_finalized = False
         for capture in self.captures.values():
             capture.start()
 
@@ -157,7 +159,7 @@ class SecureSession:
     def wait_for_sa(self) -> dict[str, str]:
         deadline = monotonic() + 10
         while monotonic() < deadline:
-            self.sas = self.pair.list_sas()
+            self.refresh_sas()
             if all(
                 parse_sa(self.sas[name]).ike_state == "ESTABLISHED"
                 and parse_sa(self.sas[name]).child_state == "INSTALLED"
@@ -166,6 +168,16 @@ class SecureSession:
                 return self.sas
             sleep(0.1)
         raise TimeoutError("IKE and CHILD SAs did not become established")
+
+    def refresh_sas(self) -> dict[str, str]:
+        self.sas = self.pair.list_sas()
+        return self.sas
+
+    def capture_snapshot(self, destination: Path) -> Path:
+        primary = self.captures.get("primary")
+        if primary is None:
+            raise RuntimeError("primary capture is unavailable")
+        return primary.snapshot(destination)
 
     def collect_xfrm(self) -> dict[str, str]:
         for gateway, namespace in (
@@ -206,6 +218,8 @@ class SecureSession:
         return self.pfs
 
     def stop_captures(self) -> None:
+        if self._captures_finalized:
+            return
         run_cleanup_steps(
             tuple((f"{name}_capture", capture.stop) for name, capture in self.captures.items())
         )
@@ -213,6 +227,7 @@ class SecureSession:
         for name, destination in self.destinations.items():
             shutil.move(str(self.temporary_pcaps[name]), destination)
         self.runtime_dir.rmdir()
+        self._captures_finalized = True
 
     def validate_captures(self) -> CaptureEvidence:
         primary = validate_pcap(

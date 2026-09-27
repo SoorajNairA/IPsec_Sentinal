@@ -6,6 +6,8 @@ from typing import TextIO
 import os
 import re
 import signal
+import shutil
+import struct
 import subprocess
 
 from ipsec_sentinel.models import CaptureEvidence
@@ -55,6 +57,10 @@ class CaptureSession:
     @property
     def pid(self) -> int | None:
         return self._process.pid if self._process is not None else None
+
+    @property
+    def running(self) -> bool:
+        return self._process is not None and self._process.poll() is None
 
     def command(self) -> list[str]:
         return [
@@ -125,10 +131,63 @@ class CaptureSession:
             raise RuntimeError(f"tcpdump exited with status {returncode}")
         validate_capture_log(self.log_path)
 
+    def flush(self) -> None:
+        if not self.running:
+            raise RuntimeError("packet capture is not running")
+        assert self._process is not None
+        self._process.send_signal(signal.SIGUSR2)
+
+    def snapshot(self, destination: Path) -> Path:
+        if not self.running:
+            raise RuntimeError("packet capture is not running")
+        destination = Path(destination)
+        if destination.resolve() == self.pcap_path.resolve():
+            raise ValueError("capture snapshot destination must differ from source")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        temporary = destination.with_name(f".{destination.name}.{os.getpid()}.tmp")
+        deadline = monotonic() + self.timeout
+        try:
+            while monotonic() < deadline:
+                self.flush()
+                sleep(0.05)
+                try:
+                    shutil.copyfile(self.pcap_path, temporary)
+                    _validate_complete_pcap(temporary)
+                except (OSError, CaptureValidationError):
+                    temporary.unlink(missing_ok=True)
+                    continue
+                temporary.replace(destination)
+                return destination
+        finally:
+            temporary.unlink(missing_ok=True)
+        raise TimeoutError("tcpdump did not produce a stable PCAP snapshot")
+
     def _close_log(self) -> None:
         if self._log is not None:
             self._log.close()
             self._log = None
+
+
+def _validate_complete_pcap(path: Path) -> None:
+    content = path.read_bytes()
+    if len(content) < 24:
+        raise CaptureValidationError("PCAP snapshot is missing its global header")
+    magic = content[:4]
+    if magic in (b"\xd4\xc3\xb2\xa1", b"\x4d\x3c\xb2\xa1"):
+        byte_order = "<"
+    elif magic in (b"\xa1\xb2\xc3\xd4", b"\xa1\xb2\x3c\x4d"):
+        byte_order = ">"
+    else:
+        raise CaptureValidationError("PCAP snapshot has an unsupported header")
+    offset = 24
+    while offset < len(content):
+        if len(content) - offset < 16:
+            raise CaptureValidationError("PCAP snapshot ends inside a packet header")
+        included_length = struct.unpack_from(f"{byte_order}I", content, offset + 8)[0]
+        offset += 16
+        if included_length > len(content) - offset:
+            raise CaptureValidationError("PCAP snapshot ends inside packet data")
+        offset += included_length
 
 
 def validate_pcap(

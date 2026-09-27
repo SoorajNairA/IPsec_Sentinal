@@ -1,6 +1,7 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import patch
+from unittest.mock import Mock, patch
+import signal
 import subprocess
 import unittest
 
@@ -136,6 +137,56 @@ class CaptureValidationTest(unittest.TestCase):
         ):
             with self.assertRaisesRegex(CaptureValidationError, "timed out"):
                 self.validate("ike-esp.pcap")
+
+    def test_running_and_flush_are_repeatable_without_stopping_tcpdump(self) -> None:
+        process = Mock()
+        process.pid = 4132
+        process.poll.return_value = None
+        session = CaptureSession(Path("live.pcap"), Path("tcpdump.log"))
+        session._process = process
+
+        self.assertTrue(session.running)
+        session.flush()
+        session.flush()
+
+        self.assertEqual(
+            process.send_signal.call_args_list,
+            [unittest.mock.call(signal.SIGUSR2), unittest.mock.call(signal.SIGUSR2)],
+        )
+        process.wait.assert_not_called()
+        process.kill.assert_not_called()
+
+    def test_snapshot_copies_a_complete_prefix_while_capture_keeps_running(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "active.pcap"
+            destination = root / "snapshots" / "current.pcap"
+            source.write_bytes((FIXTURES / "ike-esp.pcap").read_bytes())
+            process = Mock()
+            process.pid = 4132
+            process.poll.return_value = None
+            session = CaptureSession(
+                source,
+                root / "tcpdump.log",
+                timeout=0.2,
+                drain_seconds=0,
+            )
+            session._process = process
+
+            result = session.snapshot(destination)
+
+            self.assertEqual(result, destination)
+            self.assertEqual(destination.read_bytes(), source.read_bytes())
+            self.assertTrue(session.running)
+            process.send_signal.assert_called_with(signal.SIGUSR2)
+            process.wait.assert_not_called()
+            process.kill.assert_not_called()
+
+    def test_flush_rejects_a_capture_that_has_not_started(self) -> None:
+        session = CaptureSession(Path("live.pcap"), Path("tcpdump.log"))
+        self.assertFalse(session.running)
+        with self.assertRaisesRegex(RuntimeError, "not running"):
+            session.flush()
 
 
 if __name__ == "__main__":
