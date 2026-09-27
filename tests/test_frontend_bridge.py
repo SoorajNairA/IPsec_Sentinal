@@ -174,6 +174,20 @@ class FrontendBridgeTest(unittest.TestCase):
             status, payload = self._post(f"{base}/api/analyze", bytes(33))
             self.assertEqual((status, payload["error"]["code"]), (413, "PAYLOAD_TOO_LARGE"))
 
+    def test_non_ipsec_capture_uses_a_stable_safe_error_code(self) -> None:
+        result = {
+            "analysis": {"summary": {"status": "INCOMPLETE", "ipsec": "NOT_DETECTED", "message": "raw analyzer detail"}},
+            "xray": {},
+        }
+        with TemporaryDirectory() as directory:
+            static = Path(directory)
+            (static / "index.html").write_text("shell", encoding="utf-8")
+            base = self._start(static)
+            with patch("ipsec_sentinel.frontend.bridge.analyze_for_frontend", return_value=result):
+                status, payload = self._post(f"{base}/api/analyze", b"capture")
+        self.assertEqual((status, payload["error"]["code"]), (422, "NO_IPSEC"))
+        self.assertNotIn("raw analyzer detail", payload["error"]["message"])
+
     def test_filename_is_sanitized_and_temporary_upload_is_removed_on_success_and_failure(self) -> None:
         self.assertEqual(sanitize_capture_filename(r"..\..\secret.pcap"), "secret.pcap")
         self.assertEqual(sanitize_capture_filename("../../secret.pcap"), "secret.pcap")

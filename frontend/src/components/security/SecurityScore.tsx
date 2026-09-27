@@ -22,7 +22,7 @@ export function SecurityScore({
       </header>
       <div className="score-lead">
         <div className="score-number"><strong>{score.total}</strong><span>/ {score.maximum}</span></div>
-        <div className="coverage-composition" aria-label={`${score.assessed_weight}% evidence coverage and ${score.unassessed_weight}% unassessed`}>
+        <div className="coverage-composition" role="progressbar" aria-valuenow={score.assessed_weight} aria-valuemin={0} aria-valuemax={100} aria-label={`${score.assessed_weight}% evidence coverage and ${score.unassessed_weight}% unassessed`}>
           <span style={{ width: `${score.assessed_weight}%` }} />
         </div>
         <div className="coverage-labels"><strong>{score.assessed_weight}% evidence coverage</strong><span>{score.unassessed_weight}% unassessed</span></div>

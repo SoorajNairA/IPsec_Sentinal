@@ -106,7 +106,8 @@ describe('guided analysis workspace shell', () => {
       screen.getByLabelText('Choose a classic PCAP capture'),
       new File(['capture'], 'capture.pcapng'),
     )
-    expect(await screen.findByRole('alert')).toHaveTextContent('PCAPNG is detected but not supported yet')
+    expect(await screen.findByRole('alert')).toHaveTextContent('PCAPNG is not supported yet')
+    expect(screen.getByRole('alert')).toHaveTextContent('Export the capture as classic PCAP and retry')
     expect(analyzeCapture).not.toHaveBeenCalled()
   })
 

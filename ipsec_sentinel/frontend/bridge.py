@@ -74,7 +74,10 @@ def sanitize_capture_filename(value: str) -> str:
 
 def _analysis_error(analysis: dict[str, Any]) -> tuple[HTTPStatus, str, str]:
     message = str(analysis.get("summary", {}).get("message", "Capture analysis failed."))
+    ipsec_state = str(analysis.get("summary", {}).get("ipsec", "")).upper()
     lowered = message.lower()
+    if ipsec_state in {"NOT_DETECTED", "ABSENT"} or ("ipsec" in lowered and "not" in lowered):
+        return HTTPStatus.UNPROCESSABLE_ENTITY, "NO_IPSEC", "No IPsec traffic was detected in the capture."
     if "pcapng" in lowered:
         return HTTPStatus.UNSUPPORTED_MEDIA_TYPE, "UNSUPPORTED_PCAPNG", message
     if "link" in lowered or "ethernet" in lowered:

@@ -4,6 +4,8 @@ import { Activity, ArrowUpRight, EyeOff, LockKeyhole, Play, ScanSearch, Upload }
 import { useAnalysis } from '../../app/AnalysisContext'
 import { AnalysisProgress } from './AnalysisProgress'
 import { DemoChooser } from './DemoChooser'
+import { AnalysisError } from '../shared/AnalysisError'
+import '../shared/shared.css'
 
 const TRUST_INDICATORS = [
   { icon: LockKeyhole, label: 'Local Analysis', detail: 'Capture stays on this device' },
@@ -12,7 +14,7 @@ const TRUST_INDICATORS = [
 ]
 
 export function Landing() {
-  const { analyzeFile, error, openDemoChooser, status } = useAnalysis()
+  const { analyzeFile, error, openDemoChooser, reset, status } = useAnalysis()
   const inputRef = useRef<HTMLInputElement>(null)
   const isAnalyzing = status === 'ANALYZING'
 
@@ -70,13 +72,7 @@ export function Landing() {
             aria-label="Choose a classic PCAP capture"
             onChange={(event) => submit(event.currentTarget.files?.item(0) ?? undefined)}
           />
-          {(status === 'ERROR' || status === 'UNSUPPORTED') && error && (
-            <section className={`intake-error ${status === 'UNSUPPORTED' ? 'is-unsupported' : ''}`} role="alert">
-              <strong>{status === 'UNSUPPORTED' ? 'Capture not supported' : 'Analysis could not complete'}</strong>
-              <span>{error.message}</span>
-              <code>{error.code}</code>
-            </section>
-          )}
+          {(status === 'ERROR' || status === 'UNSUPPORTED') && error && <AnalysisError code={error.code} unsafeMessage={error.message} onReset={reset} />}
         </section>
 
         <div
