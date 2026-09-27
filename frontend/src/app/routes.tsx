@@ -4,6 +4,8 @@ import { AppShell } from '../components/shell/AppShell'
 import { Landing } from '../components/shell/Landing'
 import { useAnalysis } from './AnalysisContext'
 import { OverviewView } from './views/OverviewView'
+import { SecurityView } from './views/SecurityView'
+import { TrafficView } from './views/TrafficView'
 
 const viewHeadings = {
   overview: ['Analysis overview', 'Tunnel health, negotiated security, and evidence coverage at a glance.'],
@@ -44,7 +46,9 @@ export function AppRoutes() {
       <Route path="/analysis" element={<ReadyGuard />}>
         <Route index element={<Navigate to="overview" replace />} />
         <Route path="overview" element={<OverviewView />} />
-        {(Object.keys(viewHeadings).filter((view) => view !== 'overview') as Array<keyof typeof viewHeadings>).map((view) => (
+        <Route path="traffic" element={<TrafficView />} />
+        <Route path="security" element={<SecurityView />} />
+        {(Object.keys(viewHeadings).filter((view) => !['overview', 'traffic', 'security'].includes(view)) as Array<keyof typeof viewHeadings>).map((view) => (
           <Route key={view} path={view} element={<PlaceholderView view={view} />} />
         ))}
       </Route>

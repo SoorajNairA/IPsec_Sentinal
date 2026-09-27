@@ -118,7 +118,7 @@ describe('guided analysis workspace shell', () => {
     await user.click(await screen.findByRole('link', { name: 'Security' }))
     expect(screen.getByRole('heading', { name: 'Security findings' })).toBeVisible()
     await user.click(screen.getByRole('link', { name: 'Traffic' }))
-    expect(screen.getByRole('heading', { name: 'Traffic intelligence' })).toBeVisible()
+    expect(screen.getByRole('heading', { level: 1, name: 'Traffic intelligence' })).toBeVisible()
   })
 
   it('guards direct analysis routes until a validated analysis is loaded', async () => {
