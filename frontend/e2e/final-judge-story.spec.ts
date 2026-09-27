@@ -39,9 +39,12 @@ for (const viewport of viewports) {
     expect(horizontalOverflow).toBeLessThanOrEqual(1)
     expect(failures).toEqual([])
 
-    await page.screenshot({
-      path: `../docs/evidence/frontend/final-${viewport.name}.png`,
-      fullPage: true,
-    })
+    if (process.env.IPSEC_SENTINEL_UPDATE_FINAL_EVIDENCE === '1') {
+      await page.evaluate(async () => { await document.fonts.ready })
+      await page.screenshot({
+        path: `../docs/evidence/frontend/final-${viewport.name}.png`,
+        fullPage: true,
+      })
+    }
   })
 }
