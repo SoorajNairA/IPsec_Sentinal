@@ -4,11 +4,19 @@ from hashlib import sha256
 import json
 from pathlib import Path
 import re
+import subprocess
+from tempfile import TemporaryDirectory
 import unittest
 
 from ipsec_sentinel.analyzer.contract import validate_analysis
 from ipsec_sentinel.frontend.xray import XRAY_SCHEMA_ID, XRAY_VERSION
-from scripts.generate_frontend_demos import DEMO_SCHEMA_ID, DEMO_VERSION, DEMOS
+from scripts import generate_frontend_demos as demo_generator
+
+
+DEMO_SCHEMA_ID = demo_generator.DEMO_SCHEMA_ID
+DEMO_VERSION = demo_generator.DEMO_VERSION
+DEMOS = demo_generator.DEMOS
+generate_demos = demo_generator.generate_demos
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -53,6 +61,55 @@ class FrontendDemoTest(unittest.TestCase):
                 self.assertEqual(xray["displayed_packet_count"], len(xray["packets"]))
                 self.assertNotRegex(analysis["capture"]["path"], r"^[A-Za-z]:[\\/]")
                 self.assertFalse(analysis["capture"]["path"].startswith("/"))
+
+    def test_generation_rejects_a_falsely_attributed_analyzer_commit(self) -> None:
+        with TemporaryDirectory() as directory:
+            try:
+                generate_demos(
+                    dataset_root=ROOT,
+                    model_dir=ROOT,
+                    output=Path(directory),
+                    analyzer_commit="0" * 40,
+                )
+            except Exception as error:
+                self.assertIsInstance(error, ValueError)
+                self.assertRegex(str(error), "analyzer commit")
+            else:
+                self.fail("generation accepted a false analyzer commit")
+
+    def test_generation_rejects_dirty_non_analyzer_dependencies(self) -> None:
+        verify_source_revisions = getattr(demo_generator, "_verify_source_revisions", None)
+        self.assertIsNotNone(verify_source_revisions)
+        with TemporaryDirectory() as directory:
+            repository = Path(directory)
+            tracked = (
+                "ipsec_sentinel/analyzer/core.py",
+                "ipsec_sentinel/ml/infer.py",
+                "ipsec_sentinel/frontend/xray.py",
+                "ipsec_sentinel/pcap.py",
+                "ipsec_sentinel/artifacts.py",
+                "scripts/generate_frontend_demos.py",
+            )
+            for relative in tracked:
+                path = repository / relative
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text("clean\n", encoding="utf-8")
+            subprocess.run(["git", "init", "-q"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.name", "Sentinel Test"], cwd=repository, check=True)
+            subprocess.run(["git", "config", "user.email", "sentinel@example.invalid"], cwd=repository, check=True)
+            subprocess.run(["git", "add", "."], cwd=repository, check=True)
+            subprocess.run(["git", "commit", "-qm", "fixture"], cwd=repository, check=True)
+            commit = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            (repository / "ipsec_sentinel/pcap.py").write_text("dirty\n", encoding="utf-8")
+
+            with self.assertRaisesRegex(ValueError, "implementation sources"):
+                verify_source_revisions(commit, repository=repository)
 
 
 if __name__ == "__main__":

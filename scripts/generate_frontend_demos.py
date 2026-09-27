@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from hashlib import sha256
 import os
 from pathlib import Path
+import subprocess
 import sys
 from typing import Iterator, Sequence
 
@@ -18,6 +19,7 @@ from ipsec_sentinel.frontend.bridge import analyze_for_frontend
 
 DEMO_SCHEMA_ID = "ipsec-sentinel.frontend-demos/v1"
 DEMO_VERSION = "1.0"
+ANALYZER_PATHS = ("ipsec_sentinel/analyzer",)
 
 
 @dataclass(frozen=True)
@@ -82,6 +84,48 @@ def _digest(path: Path) -> str:
     return sha256(path.read_bytes()).hexdigest()
 
 
+def _verify_source_revisions(
+    analyzer_commit: str,
+    *,
+    repository: Path | None = None,
+) -> tuple[str, str]:
+    repository = repository or Path(__file__).resolve().parents[1]
+    try:
+        resolved = subprocess.run(
+            ["git", "rev-parse", "--verify", f"{analyzer_commit}^{{commit}}"],
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        subprocess.run(
+            ["git", "diff", "--quiet", resolved, "--", *ANALYZER_PATHS],
+            cwd=repository,
+            check=True,
+        )
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=all"],
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+        generator_commit = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=repository,
+            check=True,
+            capture_output=True,
+            text=True,
+        ).stdout.strip()
+    except subprocess.CalledProcessError as error:
+        raise ValueError(
+            "analyzer commit must resolve to the unchanged analyzer code executing this generator"
+        ) from error
+    if dirty:
+        raise ValueError("demo implementation sources must be committed and clean before generation")
+    return resolved, generator_commit
+
+
 def generate_demos(
     *,
     dataset_root: Path,
@@ -89,6 +133,7 @@ def generate_demos(
     output: Path,
     analyzer_commit: str,
 ) -> dict[str, object]:
+    analyzer_commit, generator_commit = _verify_source_revisions(analyzer_commit)
     dataset_root = dataset_root.resolve(strict=True)
     model_dir = model_dir.resolve(strict=True)
     output = output.resolve()
@@ -143,6 +188,7 @@ def generate_demos(
         "schema_id": DEMO_SCHEMA_ID,
         "version": DEMO_VERSION,
         "analyzer_commit": analyzer_commit,
+        "generator_commit": generator_commit,
         "generation_command": (
             "python scripts/generate_frontend_demos.py "
             "--dataset-root ${DATASET_ROOT} --model-dir ${MODEL_DIR} "

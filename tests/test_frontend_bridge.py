@@ -70,8 +70,10 @@ class XRayProjectionTest(unittest.TestCase):
 
             first = build_xray_projection(path, max_points=200)
             second = build_xray_projection(path, max_points=200)
+            minimum_budget = build_xray_projection(path, max_points=4)
 
         self.assertEqual(first, second)
+        self.assertLessEqual(minimum_budget["displayed_packet_count"], 4)
         self.assertTrue(first["sampled"])
         self.assertEqual(first["total_packet_count"], 1_605)
         self.assertLessEqual(first["displayed_packet_count"], 200)
@@ -87,6 +89,37 @@ class XRayProjectionTest(unittest.TestCase):
         represented_deciles = {
             min(9, int(item["relative_time_seconds"] / 1.605 * 10))
             for item in shown
+        }
+        self.assertEqual(represented_deciles, set(range(10)))
+
+    def test_time_skewed_projection_preserves_sparse_elapsed_regions(self) -> None:
+        with TemporaryDirectory() as directory:
+            path = Path(directory) / "time-skewed.pcap"
+            packets = []
+            for index in range(1_590):
+                source, destination, spi = (
+                    ("192.0.2.1", "192.0.2.2", 1)
+                    if index % 2 == 0
+                    else ("192.0.2.2", "192.0.2.1", 2)
+                )
+                packets.append((
+                    1_000_000_000 + index * 500_000,
+                    ethernet_ipv4(source, destination, 50, _esp(spi, index + 1, 80)),
+                ))
+            packets.extend(
+                (
+                    1_000_000_000 + second * 1_000_000_000,
+                    ethernet_ipv4("192.0.2.2", "192.0.2.1", 50, _esp(2, 1_590 + second, 120)),
+                )
+                for second in range(10, 101, 10)
+            )
+            write_pcap(path, packets)
+
+            projection = build_xray_projection(path, max_points=100)
+
+        represented_deciles = {
+            min(9, int(item["relative_time_seconds"] / 100 * 10))
+            for item in projection["packets"]
         }
         self.assertEqual(represented_deciles, set(range(10)))
 

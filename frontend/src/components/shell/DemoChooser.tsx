@@ -13,7 +13,7 @@ export function DemoChooser() {
           <div className="dialog-kicker"><Database size={14} /> Genuine retained captures</div>
           <Dialog.Title>Choose a guided demo</Dialog.Title>
           <Dialog.Description id="demo-description">
-            Each scenario is a checksummed analyzer result generated from real IKE and ESP evidence.
+            Each scenario is a checksummed analyzer result generated from real retained capture evidence.
           </Dialog.Description>
           <div className="demo-list">
             {demos ? demos.demos.map((demo) => (

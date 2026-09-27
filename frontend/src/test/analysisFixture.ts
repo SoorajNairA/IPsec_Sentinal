@@ -122,15 +122,15 @@ export function makeEnvelope(analysis = makeAnalysis()) {
     xray: {
       schema_id: 'ipsec-sentinel.xray/v1',
       version: '1.0',
-      total_packet_count: 3,
+      total_packet_count: 24,
       displayed_packet_count: 3,
-      sampled: false,
-      duration_seconds: 0.04,
+      sampled: true,
+      duration_seconds: 2,
       peer_pair: ['192.0.2.1', '192.0.2.2'],
       packets: [
         { relative_time_seconds: 0, length: 92, direction: 'forward' },
-        { relative_time_seconds: 0.02, length: 1180, direction: 'forward' },
-        { relative_time_seconds: 0.04, length: 188, direction: 'reverse' },
+        { relative_time_seconds: 1, length: 1180, direction: 'forward' },
+        { relative_time_seconds: 2, length: 188, direction: 'reverse' },
       ],
     },
   }

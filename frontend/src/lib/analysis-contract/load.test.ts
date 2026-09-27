@@ -42,5 +42,50 @@ describe('analysis contract loading', () => {
     expect(() => parseAnalysisEnvelope({ ...envelope, xray: { ...envelope.xray, schema_id: 'decorative.xray/v1' } })).toThrow(/x-ray|schema/i)
     expect(() => parseAnalysisEnvelope({ ...envelope, xray: { ...envelope.xray, version: '2.0' } })).toThrow(/x-ray|version/i)
   })
+
+  it('rejects payload-decryption and calibrated-confidence claims outside v1', () => {
+    const base = makeAnalysis()
+    expect(() => parseAnalysis({ ...base, esp: { ...base.esp, payload_decrypted: true } })).toThrow()
+    expect(() => parseAnalysis({
+      ...base,
+      traffic_intelligence: { ...base.traffic_intelligence, payload_decrypted: true },
+    })).toThrow()
+    expect(() => parseAnalysis({
+      ...base,
+      traffic_intelligence: { ...base.traffic_intelligence, confidence_kind: 'calibrated' },
+    })).toThrow()
+  })
+
+  it.each([
+    ['display count', (envelope: ReturnType<typeof makeEnvelope>) => ({
+      ...envelope.xray,
+      displayed_packet_count: 2,
+    })],
+    ['total count', (envelope: ReturnType<typeof makeEnvelope>) => ({
+      ...envelope.xray,
+      total_packet_count: 2,
+    })],
+    ['sampling flag', (envelope: ReturnType<typeof makeEnvelope>) => ({
+      ...envelope.xray,
+      sampled: false,
+    })],
+    ['duration mismatch', (envelope: ReturnType<typeof makeEnvelope>) => ({
+      ...envelope.xray,
+      duration_seconds: 3,
+    })],
+    ['packet beyond duration', (envelope: ReturnType<typeof makeEnvelope>) => ({
+      ...envelope.xray,
+      packets: envelope.xray.packets.map((packet, index) => (
+        index === 2 ? { ...packet, relative_time_seconds: 3 } : packet
+      )),
+    })],
+    ['timestamp order', (envelope: ReturnType<typeof makeEnvelope>) => ({
+      ...envelope.xray,
+      packets: [envelope.xray.packets[1], envelope.xray.packets[0], envelope.xray.packets[2]],
+    })],
+  ])('rejects inconsistent X-Ray %s metadata', (_name, mutate) => {
+    const envelope = makeEnvelope()
+    expect(() => parseAnalysisEnvelope({ ...envelope, xray: mutate(envelope) })).toThrow(/x-ray/i)
+  })
 })
 

@@ -32,6 +32,25 @@ export function parseAnalysisEnvelope(input: unknown): AnalysisEnvelope {
     throw new Error('Unsupported X-Ray schema or version')
   }
   const envelope = analysisEnvelopeSchema.parse(input)
-  return { ...envelope, analysis: parseAnalysis(envelope.analysis) }
+  const analysis = parseAnalysis(envelope.analysis)
+  const { packets, displayed_packet_count: displayed, total_packet_count: total } = envelope.xray
+  if (displayed !== packets.length) throw new Error('X-Ray displayed packet count does not match its packet records')
+  if (total < displayed) throw new Error('X-Ray total packet count is smaller than its display count')
+  if (envelope.xray.sampled !== (displayed !== total)) throw new Error('X-Ray sampling flag contradicts its packet counts')
+  if (total !== analysis.esp.packet_count) throw new Error('X-Ray packet total does not match the analysis ESP total')
+  if (Math.abs(envelope.xray.duration_seconds - analysis.esp.duration_seconds) > 1e-9) {
+    throw new Error('X-Ray duration does not match the analysis ESP duration')
+  }
+  for (let index = 0; index < packets.length; index += 1) {
+    const timestamp = packets[index].relative_time_seconds
+    if (timestamp > envelope.xray.duration_seconds) throw new Error('X-Ray packet timestamp exceeds its duration')
+    if (index > 0 && timestamp < packets[index - 1].relative_time_seconds) {
+      throw new Error('X-Ray packet timestamps are not monotonic')
+    }
+  }
+  const xrayPeers = envelope.xray.peer_pair
+  const espPeers = analysis.esp.peer_pair
+  if (JSON.stringify(xrayPeers) !== JSON.stringify(espPeers)) throw new Error('X-Ray peer pair does not match the analysis ESP peers')
+  return { ...envelope, analysis }
 }
 

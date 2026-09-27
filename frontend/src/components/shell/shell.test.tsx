@@ -70,6 +70,7 @@ describe('guided analysis workspace shell', () => {
 
     await user.click(screen.getByRole('button', { name: 'Run Guided Demo' }))
     expect(await screen.findByRole('dialog', { name: 'Choose a guided demo' })).toBeVisible()
+    expect(screen.getByText(/real retained capture evidence/i)).toBeVisible()
     for (const [, label] of demos) expect(screen.getByRole('button', { name: labelPattern(label) })).toBeVisible()
     await user.keyboard('{Escape}')
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
