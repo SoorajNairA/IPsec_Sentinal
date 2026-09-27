@@ -78,6 +78,7 @@
     }
   ],
   "generation_command": "python scripts/generate_frontend_demos.py --dataset-root ${DATASET_ROOT} --model-dir ${MODEL_DIR} --output frontend/public/demos --analyzer-commit 64b5884edc9cac3ceea321ce785f36cb24132401",
+  "generator_commit": "d9245bc59d8cb468f6bd1c1fc9261592835d5602",
   "schema_id": "ipsec-sentinel.frontend-demos/v1",
   "version": "1.0"
 }

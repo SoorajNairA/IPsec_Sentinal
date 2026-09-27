@@ -23,6 +23,7 @@ generate_demos = demo_generator.generate_demos
 ROOT = Path(__file__).resolve().parents[1]
 DEMO_ROOT = ROOT / "frontend" / "public" / "demos"
 ANALYZER_COMMIT = "64b5884edc9cac3ceea321ce785f36cb24132401"
+GENERATOR_COMMIT = "d9245bc59d8cb468f6bd1c1fc9261592835d5602"
 
 
 class FrontendDemoTest(unittest.TestCase):
@@ -33,6 +34,7 @@ class FrontendDemoTest(unittest.TestCase):
         self.assertEqual(self.manifest["schema_id"], DEMO_SCHEMA_ID)
         self.assertEqual(self.manifest["version"], DEMO_VERSION)
         self.assertEqual(self.manifest["analyzer_commit"], ANALYZER_COMMIT)
+        self.assertEqual(self.manifest["generator_commit"], GENERATOR_COMMIT)
         self.assertIn("generate_frontend_demos.py", self.manifest["generation_command"])
         expected = {(item.demo_id, item.run_id, item.capture_name) for item in DEMOS}
         actual = {
