@@ -1,0 +1,64 @@
+{
+  "displayed_packet_count": 10,
+  "duration_seconds": 0.815704,
+  "packets": [
+    {
+      "direction": "forward",
+      "length": 170,
+      "relative_time_seconds": 0.0
+    },
+    {
+      "direction": "reverse",
+      "length": 170,
+      "relative_time_seconds": 0.000336
+    },
+    {
+      "direction": "forward",
+      "length": 170,
+      "relative_time_seconds": 0.203444
+    },
+    {
+      "direction": "reverse",
+      "length": 170,
+      "relative_time_seconds": 0.203842
+    },
+    {
+      "direction": "forward",
+      "length": 170,
+      "relative_time_seconds": 0.407311
+    },
+    {
+      "direction": "reverse",
+      "length": 170,
+      "relative_time_seconds": 0.407566
+    },
+    {
+      "direction": "forward",
+      "length": 170,
+      "relative_time_seconds": 0.611417
+    },
+    {
+      "direction": "reverse",
+      "length": 170,
+      "relative_time_seconds": 0.611775
+    },
+    {
+      "direction": "forward",
+      "length": 170,
+      "relative_time_seconds": 0.815399
+    },
+    {
+      "direction": "reverse",
+      "length": 170,
+      "relative_time_seconds": 0.815704
+    }
+  ],
+  "peer_pair": [
+    "192.0.2.1",
+    "192.0.2.2"
+  ],
+  "sampled": false,
+  "schema_id": "ipsec-sentinel.xray/v1",
+  "total_packet_count": 10,
+  "version": "1.0"
+}

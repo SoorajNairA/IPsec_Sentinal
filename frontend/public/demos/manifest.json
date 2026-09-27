@@ -1,0 +1,83 @@
+{
+  "analyzer_commit": "64b5884edc9cac3ceea321ce785f36cb24132401",
+  "demos": [
+    {
+      "analysis_path": "/demos/secure-baseline/analysis.json",
+      "description": "IKEv2 with AES-256-GCM and independently observed CHILD_SA PFS rekey evidence.",
+      "id": "secure-baseline",
+      "label": "Secure Baseline",
+      "sha256": {
+        "analysis": "31ece2c6d20cf006566aef4e246ed35f9dfff5fc4429e9e88a334694395c9a8c",
+        "xray": "18095b1e0e329cc66f9cb9263ca9ce2a77ed0730663af2955483ce0b4b96a12f"
+      },
+      "source": {
+        "capture": "full-evidence.pcap",
+        "run_id": "run_000001"
+      },
+      "xray_path": "/demos/secure-baseline/xray.json"
+    },
+    {
+      "analysis_path": "/demos/aes128-gcm/analysis.json",
+      "description": "A genuine AES-128-GCM session with the same protected topology and PFS policy.",
+      "id": "aes128-gcm",
+      "label": "AES-128-GCM",
+      "sha256": {
+        "analysis": "94784436569d2c2f9a8bdaa2bbc707929e0ba0355addd1dfbd47c830b00c12e4",
+        "xray": "5ee76a1e97fef14bd8578977b94da859ba86e085156c651760b5c295f5251b82"
+      },
+      "source": {
+        "capture": "full-evidence.pcap",
+        "run_id": "run_000043"
+      },
+      "xray_path": "/demos/aes128-gcm/xray.json"
+    },
+    {
+      "analysis_path": "/demos/aes256-cbc/analysis.json",
+      "description": "A genuine CBC/HMAC session retaining establishment, ESP, and rekey evidence.",
+      "id": "aes256-cbc",
+      "label": "AES-256-CBC + SHA-256",
+      "sha256": {
+        "analysis": "3c7627b1eeb8024c6bcdb42a3ab697c9c9ebc961511dfe6f42c65a6f36470033",
+        "xray": "9ab5169b9b00bb8db439543571fab636cd8e341b6c77b49fb4b1e621113b191a"
+      },
+      "source": {
+        "capture": "full-evidence.pcap",
+        "run_id": "run_000085"
+      },
+      "xray_path": "/demos/aes256-cbc/xray.json"
+    },
+    {
+      "analysis_path": "/demos/no-pfs/analysis.json",
+      "description": "A controlled AES-256-GCM session with observed CHILD_SA PFS disabled.",
+      "id": "no-pfs",
+      "label": "PFS Disabled",
+      "sha256": {
+        "analysis": "ad1a6fb41a20756df1a34ead49454184e5ee1e4324a5e9b47515eda60ff33a37",
+        "xray": "dcf6fd48f735dba381a813f381c574835be2aa414f0b441ccb1b376210f3ed7e"
+      },
+      "source": {
+        "capture": "full-evidence.pcap",
+        "run_id": "run_000127"
+      },
+      "xray_path": "/demos/no-pfs/xray.json"
+    },
+    {
+      "analysis_path": "/demos/video-traffic/analysis.json",
+      "description": "An ESP-only workload window analyzed by the retained encrypted-traffic model.",
+      "id": "video-traffic",
+      "label": "Video Traffic Intelligence",
+      "sha256": {
+        "analysis": "a837399870370f5b4cb5221f4a2086634fdab19c09f94079ce02604655c12b53",
+        "xray": "f1f7fb6d11e90974b91dff208f64ffb5165171f84cdad489552ce2d7d8c2d61f"
+      },
+      "source": {
+        "capture": "encrypted.pcap",
+        "run_id": "run_000013"
+      },
+      "xray_path": "/demos/video-traffic/xray.json"
+    }
+  ],
+  "generation_command": "python scripts/generate_frontend_demos.py --dataset-root ${DATASET_ROOT} --model-dir ${MODEL_DIR} --output frontend/public/demos --analyzer-commit 64b5884edc9cac3ceea321ce785f36cb24132401",
+  "schema_id": "ipsec-sentinel.frontend-demos/v1",
+  "version": "1.0"
+}

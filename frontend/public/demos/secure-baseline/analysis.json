@@ -1,0 +1,802 @@
+{
+  "analysis_version": "1.0",
+  "capture": {
+    "capture_bytes": 11057,
+    "duration_seconds": 0.839428,
+    "first_timestamp_ns": 1790421438647598000,
+    "format": "pcap",
+    "last_timestamp_ns": 1790421439487026000,
+    "packet_count": 22,
+    "path": "runs/run_000001/full-evidence.pcap",
+    "warnings": []
+  },
+  "controlled_evidence": {
+    "available": true,
+    "configured": {
+      "esp_proposal": "aes256gcm16-ecp384",
+      "ike_proposal": "aes256gcm16-prfsha384-ecp384",
+      "ike_version": 2,
+      "ip_version": 4,
+      "local_subnet": "10.10.0.0/24",
+      "mode": "tunnel",
+      "normalized_esp": {
+        "dh_group": "ECP-384",
+        "encryption": "AES-256-GCM",
+        "integrity": "UNKNOWN"
+      },
+      "pfs": true,
+      "remote_subnet": "10.20.0.0/24",
+      "transit_subnet": "192.0.2.0/30"
+    },
+    "observed": {
+      "esp_proposal": "AES_GCM_16_256/NO_EXT_SEQ",
+      "ike_proposal": "AES_GCM_16_256/PRF_HMAC_SHA2_384/ECP_384",
+      "ike_version": 2,
+      "normalized_esp": {
+        "dh_group": "UNKNOWN",
+        "encryption": "AES-256-GCM",
+        "integrity": "UNKNOWN"
+      },
+      "pfs": {
+        "evidence": [
+          "gateway-a SPIs ('cbfa339a', 'cf763fa2') -> ('c0a5fdb9', 'ce6e12f3')",
+          "gateway-b SPIs ('cf763fa2', 'cbfa339a') -> ('ce6e12f3', 'c0a5fdb9')",
+          "rekey_completed=True",
+          "reciprocal_spis=True",
+          "both_directions_changed=True",
+          "pfs_configured=True",
+          "expected_rekey_proposal_selected=True",
+          "unexpected_child_dh=True",
+          "selected proposal: ESP:AES_GCM_16_256/ECP_384/NO_EXT_SEQ"
+        ],
+        "rekey_observed": true,
+        "status": "VERIFIED"
+      }
+    },
+    "run_id": "run_000001",
+    "scenario_id": "secure-baseline",
+    "source": "controlled-lab-artifacts",
+    "verification_status": "PASS"
+  },
+  "esp": {
+    "bytes": 8540,
+    "direction_bytes": {
+      "forward": 4270,
+      "reverse": 4270
+    },
+    "direction_counts": {
+      "forward": 7,
+      "reverse": 7
+    },
+    "duration_seconds": 0.621116,
+    "feature_schema_version": "ipsec-sentinel.esp-session-features/v1",
+    "features": {
+      "burst_byte_max": 610.0,
+      "burst_byte_mean": 610.0,
+      "burst_byte_std": 0.0,
+      "burst_count": 14.0,
+      "burst_duration_max": 0.0,
+      "burst_duration_mean": 0.0,
+      "burst_packet_max": 1.0,
+      "burst_packet_mean": 1.0,
+      "burst_packet_std": 0.0,
+      "byte_rate": 13749.444548200336,
+      "consecutive_same_size_ratio": 1.0,
+      "direction_switch_count": 13.0,
+      "direction_switch_ratio": 1.0,
+      "dominant_size_ratio": 1.0,
+      "duration_seconds": 0.621116,
+      "forward_byte_count": 4270.0,
+      "forward_byte_ratio": 0.5,
+      "forward_iat_max": 0.10420599999999997,
+      "forward_iat_mean": 0.103477,
+      "forward_iat_median": 0.10402750000000002,
+      "forward_iat_min": 0.100534,
+      "forward_iat_p10": 0.10221,
+      "forward_iat_p25": 0.10391425,
+      "forward_iat_p75": 0.10414975000000001,
+      "forward_iat_p90": 0.1041935,
+      "forward_iat_p95": 0.10419974999999998,
+      "forward_iat_std": 0.0013205625064090446,
+      "forward_packet_count": 7.0,
+      "forward_packet_ratio": 0.5,
+      "forward_size_entropy": -0.0,
+      "forward_size_max": 610.0,
+      "forward_size_mean": 610.0,
+      "forward_size_median": 610.0,
+      "forward_size_min": 610.0,
+      "forward_size_p10": 610.0,
+      "forward_size_p25": 610.0,
+      "forward_size_p75": 610.0,
+      "forward_size_p90": 610.0,
+      "forward_size_p95": 610.0,
+      "forward_size_std": 0.0,
+      "forward_size_unique_ratio": 0.14285714285714285,
+      "iat_cv": 1.0737871779250916,
+      "iat_lag1_autocorrelation": -0.9227768832940073,
+      "iat_max": 0.10396,
+      "iat_mean": 0.047778153846153845,
+      "iat_median": 0.0004530000000000367,
+      "iat_min": 0.00024599999999996847,
+      "iat_p10": 0.0002461999999999742,
+      "iat_p25": 0.0002530000000000032,
+      "iat_p75": 0.10363900000000001,
+      "iat_p90": 0.10390440000000001,
+      "iat_p95": 0.1039408,
+      "iat_std": 0.05130356898493239,
+      "idle_gap_1000ms_count": 0.0,
+      "idle_gap_1000ms_ratio": 0.0,
+      "idle_gap_200ms_count": 0.0,
+      "idle_gap_200ms_ratio": 0.0,
+      "idle_gap_50ms_count": 6.0,
+      "idle_gap_50ms_ratio": 0.46153846153846156,
+      "longest_direction_run_bytes": 610.0,
+      "longest_direction_run_packets": 1.0,
+      "packet_count": 14.0,
+      "packet_rate": 22.540073029836616,
+      "reverse_byte_count": 4270.0,
+      "reverse_byte_ratio": 0.5,
+      "reverse_iat_max": 0.10441300000000003,
+      "reverse_iat_mean": 0.10346683333333334,
+      "reverse_iat_median": 0.10397450000000001,
+      "reverse_iat_min": 0.100472,
+      "reverse_iat_p10": 0.10213199999999997,
+      "reverse_iat_p25": 0.10381524999999994,
+      "reverse_iat_p75": 0.10414725000000001,
+      "reverse_iat_p90": 0.10429400000000003,
+      "reverse_iat_p95": 0.10435350000000003,
+      "reverse_iat_std": 0.0013541887382816672,
+      "reverse_packet_count": 7.0,
+      "reverse_packet_ratio": 0.5,
+      "reverse_size_entropy": -0.0,
+      "reverse_size_max": 610.0,
+      "reverse_size_mean": 610.0,
+      "reverse_size_median": 610.0,
+      "reverse_size_min": 610.0,
+      "reverse_size_p10": 610.0,
+      "reverse_size_p25": 610.0,
+      "reverse_size_p75": 610.0,
+      "reverse_size_p90": 610.0,
+      "reverse_size_p95": 610.0,
+      "reverse_size_std": 0.0,
+      "reverse_size_unique_ratio": 0.14285714285714285,
+      "size_bin_0_127_ratio": 0.0,
+      "size_bin_1024_1279_ratio": 0.0,
+      "size_bin_1280_1517_ratio": 0.0,
+      "size_bin_128_255_ratio": 0.0,
+      "size_bin_1518_plus_ratio": 0.0,
+      "size_bin_256_511_ratio": 0.0,
+      "size_bin_512_1023_ratio": 1.0,
+      "size_cv": 0.0,
+      "size_entropy": -0.0,
+      "size_lag1_autocorrelation": 0.0,
+      "size_max": 610.0,
+      "size_mean": 610.0,
+      "size_median": 610.0,
+      "size_min": 610.0,
+      "size_p10": 610.0,
+      "size_p25": 610.0,
+      "size_p75": 610.0,
+      "size_p90": 610.0,
+      "size_p95": 610.0,
+      "size_std": 0.0,
+      "size_unique_ratio": 0.07142857142857142,
+      "total_bytes": 8540.0
+    },
+    "packet_count": 14,
+    "payload_decrypted": false,
+    "peer_pair": [
+      "192.0.2.1",
+      "192.0.2.2"
+    ],
+    "spi_distribution": {
+      "0xcbfa339a": 7,
+      "0xcf763fa2": 7
+    }
+  },
+  "evidence": [
+    {
+      "confidence": null,
+      "description": "IKE traffic observed",
+      "id": "ev-protocol-ike-001",
+      "normalized_value": 8,
+      "packet_numbers": [
+        1,
+        2,
+        3,
+        4,
+        19,
+        20,
+        21,
+        22
+      ],
+      "protocol": "IKE",
+      "provenance": "OBSERVED",
+      "raw_value": 8,
+      "source_component": "protocol-detector",
+      "timestamps_ns": [
+        1790421438647598000,
+        1790421438651514000,
+        1790421438654426000,
+        1790421438690373000,
+        1790421439479254000,
+        1790421439483015000,
+        1790421439485603000,
+        1790421439487026000
+      ]
+    },
+    {
+      "confidence": null,
+      "description": "ESP traffic observed",
+      "id": "ev-protocol-esp-001",
+      "normalized_value": 14,
+      "packet_numbers": [
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18
+      ],
+      "protocol": "ESP",
+      "provenance": "OBSERVED",
+      "raw_value": 14,
+      "source_component": "protocol-detector",
+      "timestamps_ns": [
+        1790421438797678000,
+        1790421438797993000,
+        1790421438898212000,
+        1790421438898465000,
+        1790421439002393000,
+        1790421439002640000,
+        1790421439106279000,
+        1790421439106525000,
+        1790421439210485000,
+        1790421439210938000,
+        1790421439314484000,
+        1790421439314730000,
+        1790421439418540000,
+        1790421439418794000
+      ]
+    },
+    {
+      "confidence": null,
+      "description": "IKEv2 header version observed",
+      "id": "ev-ike-version-001",
+      "normalized_value": "IKEv2",
+      "packet_numbers": [
+        1,
+        2,
+        3,
+        4,
+        19,
+        20,
+        21,
+        22
+      ],
+      "protocol": "IKEv2",
+      "provenance": "OBSERVED",
+      "raw_value": "IKEv2",
+      "source_component": "protocol-detector",
+      "timestamps_ns": [
+        1790421438647598000,
+        1790421438651514000,
+        1790421438654426000,
+        1790421438690373000,
+        1790421439479254000,
+        1790421439483015000,
+        1790421439485603000,
+        1790421439487026000
+      ]
+    },
+    {
+      "confidence": null,
+      "description": "AES-256-GCM selected in responder IKE_SA_INIT SA payload",
+      "id": "ev-ike-encryption-001",
+      "normalized_value": "AES-256-GCM",
+      "packet_numbers": [
+        2
+      ],
+      "protocol": "IKEv2",
+      "provenance": "OBSERVED",
+      "raw_value": "AES_GCM_16_256",
+      "source_component": "ike-parser",
+      "timestamps_ns": [
+        1790421438651514000
+      ]
+    },
+    {
+      "confidence": null,
+      "description": "TYPE_2_ID_6 selected in responder IKE_SA_INIT SA payload",
+      "id": "ev-ike-prf-001",
+      "normalized_value": "TYPE_2_ID_6",
+      "packet_numbers": [
+        2
+      ],
+      "protocol": "IKEv2",
+      "provenance": "OBSERVED",
+      "raw_value": "TYPE_2_ID_6",
+      "source_component": "ike-parser",
+      "timestamps_ns": [
+        1790421438651514000
+      ]
+    },
+    {
+      "confidence": null,
+      "description": "ECP-384 selected in responder IKE_SA_INIT SA payload",
+      "id": "ev-ike-dh_group-001",
+      "normalized_value": "ECP-384",
+      "packet_numbers": [
+        2
+      ],
+      "protocol": "IKEv2",
+      "provenance": "OBSERVED",
+      "raw_value": "ECP_384",
+      "source_component": "ike-parser",
+      "timestamps_ns": [
+        1790421438651514000
+      ]
+    },
+    {
+      "confidence": null,
+      "description": "ESP packet, byte, timing, direction, and SPI statistics calculated",
+      "id": "ev-esp-statistics-001",
+      "normalized_value": 14,
+      "packet_numbers": [
+        5,
+        6,
+        7,
+        8,
+        9,
+        10,
+        11,
+        12,
+        13,
+        14,
+        15,
+        16,
+        17,
+        18
+      ],
+      "protocol": "ESP",
+      "provenance": "DERIVED",
+      "raw_value": 14,
+      "source_component": "esp-analyzer",
+      "timestamps_ns": [
+        1790421438797678000,
+        1790421438797993000,
+        1790421438898212000,
+        1790421438898465000,
+        1790421439002393000,
+        1790421439002640000,
+        1790421439106279000,
+        1790421439106525000,
+        1790421439210485000,
+        1790421439210938000,
+        1790421439314484000,
+        1790421439314730000,
+        1790421439418540000,
+        1790421439418794000
+      ]
+    },
+    {
+      "confidence": null,
+      "description": "Controlled run configuration recorded scenario secure-baseline",
+      "id": "ev-lab-config-001",
+      "normalized_value": {
+        "dh_group": "ECP-384",
+        "encryption": "AES-256-GCM",
+        "integrity": "UNKNOWN"
+      },
+      "packet_numbers": [],
+      "protocol": null,
+      "provenance": "OBSERVED",
+      "raw_value": {
+        "esp_proposal": "aes256gcm16-ecp384",
+        "ike_proposal": "aes256gcm16-prfsha384-ecp384",
+        "ike_version": 2,
+        "ip_version": 4,
+        "local_subnet": "10.10.0.0/24",
+        "mode": "tunnel",
+        "pfs": true,
+        "remote_subnet": "10.20.0.0/24",
+        "transit_subnet": "192.0.2.0/30"
+      },
+      "source_component": "controlled-lab-artifacts",
+      "timestamps_ns": []
+    },
+    {
+      "confidence": null,
+      "description": "Controlled strongSwan/XFRM rekey evidence verified CHILD-SA PFS enabled",
+      "id": "ev-lab-pfs-001",
+      "normalized_value": "enabled",
+      "packet_numbers": [],
+      "protocol": null,
+      "provenance": "DERIVED",
+      "raw_value": [
+        "gateway-a SPIs ('cbfa339a', 'cf763fa2') -> ('c0a5fdb9', 'ce6e12f3')",
+        "gateway-b SPIs ('cf763fa2', 'cbfa339a') -> ('ce6e12f3', 'c0a5fdb9')",
+        "rekey_completed=True",
+        "reciprocal_spis=True",
+        "both_directions_changed=True",
+        "pfs_configured=True",
+        "expected_rekey_proposal_selected=True",
+        "unexpected_child_dh=True",
+        "selected proposal: ESP:AES_GCM_16_256/ECP_384/NO_EXT_SEQ"
+      ],
+      "source_component": "controlled-lab-artifacts",
+      "timestamps_ns": []
+    },
+    {
+      "confidence": 1.0,
+      "description": "Traffic classified as icmp from encrypted ESP behavior",
+      "id": "ev-traffic-inference-001",
+      "normalized_value": "icmp",
+      "packet_numbers": [],
+      "protocol": "ESP",
+      "provenance": "AI_INFERRED",
+      "raw_value": "icmp",
+      "source_component": "ml-classifier",
+      "timestamps_ns": []
+    }
+  ],
+  "findings": [
+    {
+      "evidence_ids": [
+        "ev-ike-version-001"
+      ],
+      "impact": "No legacy-version concern was observed.",
+      "provenance": "OBSERVED",
+      "recommendation": "Continue using IKEv2.",
+      "rule_id": "IPSEC-IKE-001",
+      "severity": "INFO",
+      "status": "PASS",
+      "summary": "IKEv2 is present.",
+      "technical_explanation": "The observed header identifies IKEv2.",
+      "title": "Modern IKE version"
+    },
+    {
+      "evidence_ids": [
+        "ev-ike-encryption-001"
+      ],
+      "impact": "A modern cipher protects confidentiality and integrity.",
+      "provenance": "OBSERVED",
+      "recommendation": "Retain an approved GCM configuration.",
+      "rule_id": "IPSEC-CRYPTO-001",
+      "severity": "INFO",
+      "status": "PASS",
+      "summary": "AES-256-GCM was selected.",
+      "technical_explanation": "GCM provides authenticated encryption.",
+      "title": "Modern AEAD encryption"
+    },
+    {
+      "evidence_ids": [
+        "ev-ike-dh_group-001"
+      ],
+      "impact": "IKE key establishment uses a strong group.",
+      "provenance": "OBSERVED",
+      "recommendation": "Retain an approved ECP group.",
+      "rule_id": "IPSEC-DH-001",
+      "severity": "INFO",
+      "status": "PASS",
+      "summary": "ECP-384 was selected for the observable IKE exchange.",
+      "technical_explanation": "The observed ECP group is modern.",
+      "title": "Modern key-exchange group"
+    },
+    {
+      "evidence_ids": [
+        "ev-lab-pfs-001"
+      ],
+      "impact": "Past session keys do not expose rekeyed traffic.",
+      "provenance": "DERIVED",
+      "recommendation": "Retain CHILD-SA PFS.",
+      "rule_id": "IPSEC-PFS-001",
+      "severity": "INFO",
+      "status": "PASS",
+      "summary": "Fresh CHILD-SA DH behavior verifies PFS.",
+      "technical_explanation": "The evidence establishes a new DH exchange for CHILD-SA keying.",
+      "title": "CHILD-SA PFS verified"
+    },
+    {
+      "evidence_ids": [],
+      "impact": "Replay-protection posture remains unassessed.",
+      "provenance": "UNKNOWN",
+      "recommendation": "Use endpoint runtime evidence for verification.",
+      "rule_id": "IPSEC-REPLAY-001",
+      "severity": "INFO",
+      "status": "UNKNOWN",
+      "summary": "Replay-window enforcement is not visible in a passive capture.",
+      "technical_explanation": "Packet sequence values do not prove receiver enforcement.",
+      "title": "Replay protection unassessed"
+    },
+    {
+      "evidence_ids": [
+        "ev-esp-statistics-001"
+      ],
+      "impact": "An observer may infer application behavior.",
+      "provenance": "OBSERVED",
+      "recommendation": "Use padding or traffic-flow confidentiality where the threat model requires it.",
+      "rule_id": "IPSEC-METADATA-001",
+      "severity": "INFO",
+      "status": "INFORMATIONAL",
+      "summary": "ESP conceals payload but exposes timing, sizes, direction, and duration.",
+      "technical_explanation": "Traffic analysis can use these observable properties without decryption.",
+      "title": "Encrypted metadata remains visible"
+    },
+    {
+      "evidence_ids": [
+        "ev-traffic-inference-001"
+      ],
+      "impact": "Payload confidentiality does not eliminate traffic-analysis exposure.",
+      "provenance": "AI_INFERRED",
+      "recommendation": "Treat low confidence and controlled-testbed scope explicitly.",
+      "rule_id": "IPSEC-ML-001",
+      "severity": "INFO",
+      "status": "INFORMATIONAL",
+      "summary": "The prototype model inferred an application class without decryption.",
+      "technical_explanation": "Inference uses only ESP timing, length, and direction features.",
+      "title": "Traffic type inferred from encrypted metadata"
+    }
+  ],
+  "ike": {
+    "detected": true,
+    "dh_group": {
+      "evidence_id": "ev-ike-dh_group-001",
+      "normalized": "ECP-384",
+      "provenance": "OBSERVED",
+      "raw": "ECP_384"
+    },
+    "encryption": {
+      "evidence_id": "ev-ike-encryption-001",
+      "normalized": "AES-256-GCM",
+      "provenance": "OBSERVED",
+      "raw": "AES_GCM_16_256"
+    },
+    "exchanges": [
+      {
+        "exchange_type": 34,
+        "message_id": 0,
+        "packet_number": 1,
+        "response": false
+      },
+      {
+        "exchange_type": 34,
+        "message_id": 0,
+        "packet_number": 2,
+        "response": true
+      },
+      {
+        "exchange_type": 35,
+        "message_id": 1,
+        "packet_number": 3,
+        "response": false
+      },
+      {
+        "exchange_type": 35,
+        "message_id": 1,
+        "packet_number": 4,
+        "response": true
+      },
+      {
+        "exchange_type": 36,
+        "message_id": 2,
+        "packet_number": 19,
+        "response": false
+      },
+      {
+        "exchange_type": 36,
+        "message_id": 2,
+        "packet_number": 20,
+        "response": true
+      },
+      {
+        "exchange_type": 37,
+        "message_id": 3,
+        "packet_number": 21,
+        "response": false
+      },
+      {
+        "exchange_type": 37,
+        "message_id": 3,
+        "packet_number": 22,
+        "response": true
+      }
+    ],
+    "initiator_spi": "f842c61765093e53",
+    "integrity": {
+      "normalized": "UNKNOWN",
+      "provenance": "UNKNOWN",
+      "raw": "UNKNOWN"
+    },
+    "prf": {
+      "evidence_id": "ev-ike-prf-001",
+      "normalized": "TYPE_2_ID_6",
+      "provenance": "OBSERVED",
+      "raw": "TYPE_2_ID_6"
+    },
+    "responder_spi": "e83ca8418871c944",
+    "selection_basis": "IKE_SA_INIT responder SA payload",
+    "traffic_selectors": {
+      "provenance": "UNKNOWN",
+      "value": "UNKNOWN"
+    },
+    "version": "IKEv2"
+  },
+  "limitations": [
+    {
+      "code": "NO_DECRYPTION",
+      "description": "ESP payloads were not decrypted."
+    },
+    {
+      "code": "PASSIVE_MODE",
+      "description": "Tunnel/transport mode, SA lifetime, and replay enforcement may not be passively determinable."
+    },
+    {
+      "code": "PFS_PASSIVE_LIMIT",
+      "description": "ESP rekey alone does not establish CHILD-SA PFS."
+    },
+    {
+      "code": "MODEL_SCOPE",
+      "description": "Traffic confidence is raw, uncalibrated, and based on a controlled synthetic testbed."
+    }
+  ],
+  "peers": {
+    "initiator": "192.0.2.1",
+    "multiple_sessions": false,
+    "peer_pairs": [
+      [
+        "192.0.2.1",
+        "192.0.2.2"
+      ]
+    ],
+    "responder": "192.0.2.2"
+  },
+  "pfs": {
+    "evidence_ids": [
+      "ev-lab-pfs-001"
+    ],
+    "explanation": "Controlled strongSwan/XFRM CHILD-SA rekey evidence was supplied.",
+    "provenance": "DERIVED",
+    "state": "enabled"
+  },
+  "protocols": {
+    "ah_detected": false,
+    "ah_packets": 0,
+    "esp_detected": true,
+    "esp_packets": 14,
+    "ike_detected": true,
+    "ike_packets": 8,
+    "ike_version": "IKEv2",
+    "ipsec_detected": true,
+    "natt_detected": false,
+    "natt_packets": 0,
+    "peer_pairs": [
+      [
+        "192.0.2.1",
+        "192.0.2.2"
+      ]
+    ]
+  },
+  "schema_id": "ipsec-sentinel.analysis/v1",
+  "security_associations": [
+    {
+      "bytes": 4270,
+      "destination": "192.0.2.2",
+      "first_packet_number": 5,
+      "first_timestamp_ns": 1790421438797678000,
+      "packet_count": 7,
+      "pfs": {
+        "provenance": "UNKNOWN",
+        "state": "unknown"
+      },
+      "predecessor_spi": null,
+      "rekey_provenance": "UNKNOWN",
+      "sa_type": "ESP_CHILD_SA",
+      "source": "192.0.2.1",
+      "spi": "0xcf763fa2",
+      "successor_spi": null,
+      "unique_packet_count": 7
+    },
+    {
+      "bytes": 4270,
+      "destination": "192.0.2.1",
+      "first_packet_number": 6,
+      "first_timestamp_ns": 1790421438797993000,
+      "packet_count": 7,
+      "pfs": {
+        "provenance": "UNKNOWN",
+        "state": "unknown"
+      },
+      "predecessor_spi": null,
+      "rekey_provenance": "UNKNOWN",
+      "sa_type": "ESP_CHILD_SA",
+      "source": "192.0.2.2",
+      "spi": "0xcbfa339a",
+      "successor_spi": null,
+      "unique_packet_count": 7
+    }
+  ],
+  "security_score": {
+    "assessed_weight": 80,
+    "categories": [
+      {
+        "achieved_score": 30,
+        "assessed_weight": 30,
+        "deductions": [],
+        "maximum_score": 30,
+        "name": "Cryptography",
+        "unassessed_weight": 0
+      },
+      {
+        "achieved_score": 25,
+        "assessed_weight": 25,
+        "deductions": [],
+        "maximum_score": 25,
+        "name": "Key Exchange / PFS",
+        "unassessed_weight": 0
+      },
+      {
+        "achieved_score": 5,
+        "assessed_weight": 5,
+        "deductions": [],
+        "maximum_score": 15,
+        "name": "Security Association Hygiene",
+        "unassessed_weight": 10
+      },
+      {
+        "achieved_score": 5,
+        "assessed_weight": 5,
+        "deductions": [],
+        "maximum_score": 15,
+        "name": "Replay / Protocol Protections",
+        "unassessed_weight": 10
+      },
+      {
+        "achieved_score": 15,
+        "assessed_weight": 15,
+        "deductions": [],
+        "maximum_score": 15,
+        "name": "Metadata / Privacy Exposure",
+        "unassessed_weight": 0
+      }
+    ],
+    "maximum": 100,
+    "method": "normalized over assessed evidence; UNKNOWN is not penalized",
+    "total": 100,
+    "unassessed_weight": 20
+  },
+  "summary": {
+    "ipsec": "DETECTED",
+    "message": "Analysis completed without payload decryption.",
+    "status": "COMPLETE"
+  },
+  "traffic_intelligence": {
+    "confidence_kind": "raw_uncalibrated",
+    "feature_schema_version": "ipsec-sentinel.esp-session-features/v1",
+    "model_name": "extra_trees",
+    "model_version": "ipsec-sentinel.classifier/v1",
+    "payload_decrypted": false,
+    "predicted_class": "icmp",
+    "probabilities": {
+      "email": 0.0,
+      "file_transfer": 0.0,
+      "icmp": 1.0,
+      "messaging": 0.0,
+      "video": 0.0,
+      "voip": 0.0,
+      "web": 0.0
+    },
+    "provenance": "AI_INFERRED",
+    "raw_confidence": 1.0,
+    "reason": "prototype classifier trained on controlled native-IPsec workloads",
+    "state": "PREDICTED"
+  }
+}
