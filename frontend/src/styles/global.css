@@ -277,11 +277,35 @@ button:focus-visible, a:focus-visible, input:focus-visible {
 .view-placeholder { min-height: 55vh; display: flex; flex-direction: column; justify-content: center; }
 .view-placeholder h1 { margin: 0.9rem 0 0.6rem; font-size: clamp(2.25rem, 4vw, 4rem); letter-spacing: -0.055em; }
 .view-placeholder > p:last-child { max-width: 630px; margin: 0; color: var(--text-secondary); line-height: 1.6; }
+.view-heading { margin-bottom: 1.5rem; display: flex; align-items: end; justify-content: space-between; gap: 2rem; }
+.view-heading h1 { margin: 0.75rem 0 0.45rem; font-size: clamp(2rem, 4vw, 3.5rem); font-weight: 540; letter-spacing: -0.055em; }
+.view-heading > div > p:last-child { max-width: 680px; margin: 0; color: var(--text-secondary); font-size: 0.82rem; line-height: 1.55; }
+.overview-summary { flex: 0 0 auto; display: grid; gap: 0.4rem; justify-items: end; padding-bottom: 0.3rem; }
+.overview-summary span { display: flex; align-items: center; gap: 0.45rem; color: var(--verified); font: 500 0.61rem var(--font-mono); text-transform: uppercase; letter-spacing: 0.08em; }
+.overview-summary span i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+.overview-summary strong { color: var(--text-tertiary); font: 400 0.62rem var(--font-mono); }
+.overview-layout { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 1rem; align-items: start; }
+.intelligence-rail { display: grid; gap: 1rem; }
+.traffic-signal, .priority-finding { padding: 1rem 1.1rem; border: 1px solid var(--line-strong); border-radius: var(--radius-md); background: var(--ink-900); }
+.signal-heading, .priority-finding > div { display: flex; align-items: center; gap: 0.45rem; color: var(--text-tertiary); font-size: 0.61rem; text-transform: uppercase; letter-spacing: 0.07em; }
+.signal-heading svg, .priority-finding svg { color: var(--protocol); }
+.signal-heading .provenance-mark { margin-left: auto; }
+.traffic-signal > strong { display: block; margin-top: 1rem; font-size: 1.55rem; font-weight: 540; text-transform: capitalize; letter-spacing: -0.035em; }
+.traffic-signal > p { margin: 0.3rem 0 0; color: var(--text-tertiary); font: 0.61rem var(--font-mono); }
+.payload-zero { display: block; margin-top: 0.8rem; color: var(--verified); font-size: 0.62rem; }
+.traffic-signal > button, .priority-finding > button { margin-top: 1rem; padding: 0; display: inline-flex; align-items: center; gap: 0.35rem; border: 0; background: transparent; color: var(--protocol); font-size: 0.65rem; cursor: pointer; }
+.priority-finding > strong { display: block; margin-top: 0.9rem; font-size: 0.82rem; line-height: 1.35; }
+.priority-finding > p { margin: 0.5rem 0 0; color: var(--text-tertiary); font-size: 0.67rem; line-height: 1.5; }
+.priority-finding.severity-high, .priority-finding.severity-critical { box-shadow: inset 2px 0 var(--risk); }
+.priority-finding.severity-medium { box-shadow: inset 2px 0 var(--caution); }
 
 @media (max-width: 900px) {
   .landing { grid-template-columns: 1fr; gap: 3rem; padding: 4rem 0; }
   .hero { max-width: 720px; }
   .intake-preview { min-height: 340px; }
+  .overview-layout { grid-template-columns: 1fr; }
+  .intelligence-rail { grid-template-columns: repeat(2, 1fr); }
+  .security-score { grid-row: span 2; }
 }
 
 @media (max-width: 620px) {
@@ -299,6 +323,9 @@ button:focus-visible, a:focus-visible, input:focus-visible {
   .capture-chip { display: none; }
   .analysis-nav { padding: 0 0.5rem; }
   .workspace-main { width: min(calc(100% - 2rem), 1400px); padding-top: 2rem; }
+  .view-heading { align-items: start; flex-direction: column; }
+  .overview-summary { justify-items: start; }
+  .intelligence-rail { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: reduce) {

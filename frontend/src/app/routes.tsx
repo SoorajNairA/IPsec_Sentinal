@@ -3,6 +3,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from '../components/shell/AppShell'
 import { Landing } from '../components/shell/Landing'
 import { useAnalysis } from './AnalysisContext'
+import { OverviewView } from './views/OverviewView'
 
 const viewHeadings = {
   overview: ['Analysis overview', 'Tunnel health, negotiated security, and evidence coverage at a glance.'],
@@ -42,7 +43,8 @@ export function AppRoutes() {
       <Route path="/" element={<LandingRoute />} />
       <Route path="/analysis" element={<ReadyGuard />}>
         <Route index element={<Navigate to="overview" replace />} />
-        {(Object.keys(viewHeadings) as Array<keyof typeof viewHeadings>).map((view) => (
+        <Route path="overview" element={<OverviewView />} />
+        {(Object.keys(viewHeadings).filter((view) => view !== 'overview') as Array<keyof typeof viewHeadings>).map((view) => (
           <Route key={view} path={view} element={<PlaceholderView view={view} />} />
         ))}
       </Route>

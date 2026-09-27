@@ -1,0 +1,45 @@
+.live-tunnel { border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: linear-gradient(155deg, rgba(19, 25, 31, 0.98), rgba(10, 14, 18, 0.98)); box-shadow: var(--shadow-deep); overflow: hidden; }
+.tunnel-header { min-height: 76px; padding: 1.15rem 1.35rem; display: flex; align-items: center; justify-content: space-between; border-bottom: 1px solid var(--line-subtle); }
+.section-kicker { color: var(--text-tertiary); font: 500 0.61rem var(--font-mono); letter-spacing: 0.11em; text-transform: uppercase; }
+.tunnel-header h2, .security-score h2 { margin: 0.35rem 0 0; font-size: 1.05rem; font-weight: 580; letter-spacing: -0.02em; }
+.tunnel-state { display: inline-flex; align-items: center; gap: 0.45rem; color: var(--text-tertiary); font: 500 0.63rem var(--font-mono); }
+.tunnel-state::before { content: ''; width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
+.tunnel-state.is-live { color: var(--verified); }
+.tunnel-stage { position: relative; min-height: 400px; }
+.tunnel-grid { position: absolute; inset: 0; opacity: 0.16; background-image: linear-gradient(var(--line-subtle) 1px, transparent 1px), linear-gradient(90deg, var(--line-subtle) 1px, transparent 1px); background-size: 36px 36px; mask-image: radial-gradient(ellipse at center, black 20%, transparent 75%); }
+.tunnel-stage svg { position: relative; width: 100%; min-height: 325px; display: block; }
+.tunnel-endpoint circle:first-child { fill: rgba(133, 215, 238, 0.025); stroke: rgba(133, 215, 238, 0.15); stroke-dasharray: 2 5; }
+.tunnel-endpoint circle:nth-child(2) { fill: var(--ink-850); stroke: rgba(133, 215, 238, 0.55); stroke-width: 1.2; }
+.tunnel-endpoint path { fill: none; stroke: var(--protocol); stroke-width: 1.1; opacity: 0.7; }
+.tunnel-endpoint text { fill: var(--text-tertiary); font: 500 11px var(--font-mono); letter-spacing: 1.4px; }
+.tunnel-endpoint .endpoint-address { fill: var(--text-primary); font-size: 13px; letter-spacing: 0; }
+.tunnel-outer { fill: rgba(133, 215, 238, 0.025); stroke: rgba(133, 215, 238, 0.12); stroke-width: 1; }
+.tunnel-core { fill: none; stroke: url(#tunnel-energy); stroke-width: 2.1; }
+.tunnel-return { fill: none; stroke: rgba(133, 215, 238, 0.27); stroke-width: 1; stroke-dasharray: 4 8; }
+.flow-packet { fill: var(--protocol-strong); filter: drop-shadow(0 0 5px rgba(133, 215, 238, 0.75)); }
+.flow-packet.is-return { fill: var(--protocol); opacity: 0.65; }
+.direction-glyph { fill: none; stroke: var(--protocol); stroke-width: 2; }
+.rekey-marker circle { fill: var(--ink-900); stroke: var(--caution); }.rekey-marker path { fill: none; stroke: var(--caution); }.rekey-marker text { fill: var(--caution); font: 500 9px var(--font-mono); letter-spacing: 1px; }
+.tunnel-negotiation { position: absolute; left: 50%; bottom: 0.8rem; transform: translateX(-50%); width: min(82%, 720px); display: grid; grid-template-columns: repeat(4, 1fr); border: 1px solid var(--line-subtle); border-radius: var(--radius-sm); background: rgba(8, 10, 13, 0.86); backdrop-filter: blur(8px); }
+.tunnel-negotiation div { padding: 0.75rem 0.9rem; display: grid; gap: 0.28rem; }
+.tunnel-negotiation div + div { border-left: 1px solid var(--line-subtle); }
+.tunnel-negotiation span, .key-property > span { color: var(--text-tertiary); font: 0.57rem var(--font-mono); letter-spacing: 0.07em; text-transform: uppercase; }
+.tunnel-negotiation strong { font-size: 0.72rem; font-weight: 540; }
+.key-exchange-layer { display: grid; grid-template-columns: repeat(3, 1fr); border-top: 1px solid var(--line-subtle); }
+.key-property { position: relative; min-height: 135px; padding: 1rem 1.15rem; display: flex; flex-direction: column; align-items: flex-start; gap: 0.5rem; }
+.key-property + .key-property { border-left: 1px solid var(--line-subtle); }
+.key-property strong { font: 500 0.78rem var(--font-mono); }
+.key-property .evidence-action { margin-top: auto; }
+.pfs-property p { margin: 0; color: var(--caution); font-size: 0.66rem; line-height: 1.4; }
+.pfs-property button { margin-top: auto; padding: 0; border: 0; background: transparent; color: var(--protocol); font-size: 0.65rem; text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.key-exchange-layer.is-warning .pfs-property { background: rgba(216, 167, 93, 0.055); box-shadow: inset 0 2px var(--caution); }
+
+@media (max-width: 760px) {
+  .tunnel-stage { min-height: 440px; }
+  .tunnel-stage svg { margin-top: 1rem; }
+  .tunnel-negotiation { width: calc(100% - 2rem); grid-template-columns: repeat(2, 1fr); }
+  .tunnel-negotiation div:nth-child(3) { border-left: 0; border-top: 1px solid var(--line-subtle); }
+  .tunnel-negotiation div:nth-child(4) { border-top: 1px solid var(--line-subtle); }
+  .key-exchange-layer { grid-template-columns: 1fr; }
+  .key-property + .key-property { border-left: 0; border-top: 1px solid var(--line-subtle); }
+}
