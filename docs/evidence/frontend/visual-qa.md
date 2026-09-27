@@ -33,7 +33,7 @@ The final rendered review answers the specification's three questions favorably:
 
 ## Performance and bounded rendering
 
-- Production build: CSS 51.43 kB (10.09 kB gzip); JavaScript 590.04 kB (182.01 kB gzip).
+- Production build: CSS 51.43 kB (10.09 kB gzip); JavaScript 590.17 kB (182.03 kB gzip).
 - Vite reports the JavaScript chunk above its 500 kB advisory threshold. This is acceptable for the local prototype, but route-level code splitting is a documented optimization for a production distribution.
 - The real video demo contains 1,205 ESP packets and displays all 1,205 metadata points smoothly. Projection generation is deterministically capped at 1,500 displayed points for larger captures while analyzer totals remain unchanged.
 - Local guided-demo content became interactive within the Playwright navigation/assertion timeout without network services. This was an operational observation, not a formal performance benchmark.
