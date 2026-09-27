@@ -7,6 +7,7 @@ import re
 import subprocess
 from tempfile import TemporaryDirectory
 import unittest
+from unittest.mock import patch
 
 from ipsec_sentinel.analyzer.contract import validate_analysis
 from ipsec_sentinel.frontend.xray import XRAY_SCHEMA_ID, XRAY_VERSION
@@ -110,6 +111,14 @@ class FrontendDemoTest(unittest.TestCase):
 
             with self.assertRaisesRegex(ValueError, "implementation sources"):
                 verify_source_revisions(commit, repository=repository)
+
+    def test_git_command_falls_back_for_a_windows_linked_worktree_in_wsl(self) -> None:
+        git_executable = getattr(demo_generator, "_git_executable", None)
+        self.assertIsNotNone(git_executable)
+        native_failure = subprocess.CalledProcessError(128, ["git", "rev-parse"])
+        windows_success = subprocess.CompletedProcess(["git.exe", "rev-parse"], 0, "true\n", "")
+        with patch.object(demo_generator.subprocess, "run", side_effect=(native_failure, windows_success)):
+            self.assertEqual(git_executable(ROOT), "git.exe")
 
 
 if __name__ == "__main__":

@@ -84,34 +84,51 @@ def _digest(path: Path) -> str:
     return sha256(path.read_bytes()).hexdigest()
 
 
+def _git_executable(repository: Path) -> str:
+    for executable in ("git", "git.exe"):
+        try:
+            subprocess.run(
+                [executable, "rev-parse", "--is-inside-work-tree"],
+                cwd=repository,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
+        except (FileNotFoundError, subprocess.CalledProcessError):
+            continue
+        return executable
+    raise ValueError("demo provenance requires an accessible Git worktree")
+
+
 def _verify_source_revisions(
     analyzer_commit: str,
     *,
     repository: Path | None = None,
 ) -> tuple[str, str]:
     repository = repository or Path(__file__).resolve().parents[1]
+    git = _git_executable(repository)
     try:
         resolved = subprocess.run(
-            ["git", "rev-parse", "--verify", f"{analyzer_commit}^{{commit}}"],
+            [git, "rev-parse", "--verify", f"{analyzer_commit}^{{commit}}"],
             cwd=repository,
             check=True,
             capture_output=True,
             text=True,
         ).stdout.strip()
         subprocess.run(
-            ["git", "diff", "--quiet", resolved, "--", *ANALYZER_PATHS],
+            [git, "diff", "--quiet", resolved, "--", *ANALYZER_PATHS],
             cwd=repository,
             check=True,
         )
         dirty = subprocess.run(
-            ["git", "status", "--porcelain", "--untracked-files=all"],
+            [git, "status", "--porcelain", "--untracked-files=all"],
             cwd=repository,
             check=True,
             capture_output=True,
             text=True,
         ).stdout.strip()
         generator_commit = subprocess.run(
-            ["git", "rev-parse", "HEAD"],
+            [git, "rev-parse", "HEAD"],
             cwd=repository,
             check=True,
             capture_output=True,
