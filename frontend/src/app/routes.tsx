@@ -4,28 +4,11 @@ import { AppShell } from '../components/shell/AppShell'
 import { Landing } from '../components/shell/Landing'
 import { useAnalysis } from './AnalysisContext'
 import { OverviewView } from './views/OverviewView'
+import { EvidenceView } from './views/EvidenceView'
+import { ReportView } from './views/ReportView'
 import { SecurityView } from './views/SecurityView'
 import { TrafficView } from './views/TrafficView'
-
-const viewHeadings = {
-  overview: ['Analysis overview', 'Tunnel health, negotiated security, and evidence coverage at a glance.'],
-  tunnel: ['Tunnel reconstruction', 'IKE negotiation and Security Association chronology.'],
-  traffic: ['Traffic intelligence', 'Encrypted ESP behavior and model inference.'],
-  security: ['Security findings', 'Evidence-backed posture and prioritized recommendations.'],
-  evidence: ['Evidence ledger', 'Observed, derived, inferred, and unknown claims.'],
-  report: ['Analysis report', 'A clear, export-ready explanation of the session.'],
-} as const
-
-function PlaceholderView({ view }: { view: keyof typeof viewHeadings }) {
-  const [heading, description] = viewHeadings[view]
-  return (
-    <section className="view-placeholder">
-      <p className="eyebrow"><span />Validated analysis</p>
-      <h1>{heading}</h1>
-      <p>{description}</p>
-    </section>
-  )
-}
+import { TunnelView } from './views/TunnelView'
 
 function LandingRoute() {
   const { status } = useAnalysis()
@@ -46,11 +29,11 @@ export function AppRoutes() {
       <Route path="/analysis" element={<ReadyGuard />}>
         <Route index element={<Navigate to="overview" replace />} />
         <Route path="overview" element={<OverviewView />} />
+        <Route path="tunnel" element={<TunnelView />} />
         <Route path="traffic" element={<TrafficView />} />
         <Route path="security" element={<SecurityView />} />
-        {(Object.keys(viewHeadings).filter((view) => !['overview', 'traffic', 'security'].includes(view)) as Array<keyof typeof viewHeadings>).map((view) => (
-          <Route key={view} path={view} element={<PlaceholderView view={view} />} />
-        ))}
+        <Route path="evidence" element={<EvidenceView />} />
+        <Route path="report" element={<ReportView />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
