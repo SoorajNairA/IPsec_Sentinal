@@ -36,6 +36,14 @@ from ipsec_sentinel.live.provider import (
     SCENARIO_NAMES,
     VALIDATED_SCENARIOS,
 )
+from ipsec_sentinel.live.runtime import (
+    LiveLabLock,
+    OwnedProcess,
+    RuntimeOwnership,
+    process_start_identity,
+    record_resource,
+    recover_stale_runtime,
+)
 from ipsec_sentinel.session import SecureSession
 from ipsec_sentinel.artifacts import write_json_atomic, write_text_atomic
 from ipsec_sentinel.dataset.models import WorkloadWindow as DatasetWorkloadWindow
@@ -52,6 +60,7 @@ from ipsec_sentinel.traffic.base import (
     TrafficValidation,
     create_generator,
 )
+from ipsec_sentinel.topology import NAMESPACES
 
 
 SessionFactory = Callable[..., SecureSession]
@@ -71,6 +80,7 @@ class _SessionRecord:
     provider: LabProvider
     store: EventStore
     log: TextIO
+    ownership_path: Path
     next_workload_sequence: int = 1
     esp_totals: EspTotals = field(default_factory=EspTotals.empty)
     analysis: Mapping[str, object] | None = None
@@ -147,6 +157,25 @@ class LiveLabOrchestrator:
     ) -> None:
         self.root_dir = Path(root_dir)
         self.root_dir.mkdir(parents=True, exist_ok=True, mode=0o750)
+        self._runtime_lock = LiveLabLock.acquire(self.root_dir / ".live-lab.lock")
+        try:
+            for ownership_path in sorted(
+                self.root_dir.glob("SNT-*/runtime-ownership.json")
+            ):
+                ownership = RuntimeOwnership.read(ownership_path)
+                report = recover_stale_runtime(
+                    ownership_path,
+                    runtime_roots=(
+                        Path("/run/ipsec-sentinel") / ownership.session_id,
+                    ),
+                )
+                if report.status == "PARTIAL":
+                    raise RuntimeError(
+                        f"stale Live Lab recovery incomplete for {ownership.session_id}"
+                    )
+        except BaseException:
+            self._runtime_lock.release()
+            raise
         self._session_factory = session_factory
         self._provider_factory = provider_factory
         self._owns_executor = executor is None
@@ -173,20 +202,34 @@ class LiveLabOrchestrator:
             return
         self._closed = True
         errors: list[str] = []
-        if self._owns_executor:
-            try:
-                assert isinstance(self._executor, ThreadPoolExecutor)
-                self._executor.shutdown(wait=True, cancel_futures=False)
-            except BaseException as error:
-                errors.append(f"executor: {error}")
-        for record in self._records.values():
-            try:
-                if bool(record.provider.health().get("ready")):
-                    record.provider.stop_scenario()
-            except BaseException as error:
-                errors.append(f"{record.store.snapshot.session_id} cleanup: {error}")
-            finally:
-                record.log.close()
+        try:
+            if self._owns_executor:
+                try:
+                    assert isinstance(self._executor, ThreadPoolExecutor)
+                    self._executor.shutdown(wait=True, cancel_futures=False)
+                except BaseException as error:
+                    errors.append(f"executor: {error}")
+            for record in self._records.values():
+                cleanup_succeeded = (
+                    record.store.snapshot.cleanup_status
+                    is not CleanupStatus.FAILED
+                )
+                try:
+                    if record.store.snapshot.state is not SessionState.IDLE:
+                        self._record_live_resources(record)
+                    if cleanup_succeeded and bool(
+                        record.provider.health().get("ready")
+                    ):
+                        record.provider.stop_scenario()
+                except BaseException as error:
+                    cleanup_succeeded = False
+                    errors.append(f"{record.store.snapshot.session_id} cleanup: {error}")
+                finally:
+                    if cleanup_succeeded:
+                        record.ownership_path.unlink(missing_ok=True)
+                    record.log.close()
+        finally:
+            self._runtime_lock.release()
         if errors:
             raise RuntimeError("Live Lab shutdown errors: " + "; ".join(errors))
 
@@ -234,6 +277,10 @@ class LiveLabOrchestrator:
             log,
             primary_capture_name="full-evidence.pcap",
         )
+        ownership_path = run_dir / "runtime-ownership.json"
+        ownership = RuntimeOwnership.create(session_id)
+        ownership.write(ownership_path)
+        record_resource(ownership_path, evidence_path=run_dir)
         initial = LiveSessionSnapshot(
             session_id=session_id,
             display_name=display_name,
@@ -252,6 +299,7 @@ class LiveLabOrchestrator:
             self._provider_factory(secure_session),
             store,
             log,
+            ownership_path,
         )
         self._records[session_id] = record
         self._active_id = session_id
@@ -748,6 +796,7 @@ class LiveLabOrchestrator:
             snapshot=cleaning,
             durable=True,
         )
+        self._record_live_resources(record)
         try:
             record.provider.stop_scenario()
         except BaseException as error:
@@ -783,6 +832,7 @@ class LiveLabOrchestrator:
                 durable=True,
             )
             return
+        record.ownership_path.unlink(missing_ok=True)
         complete = transition(
             record.store.snapshot,
             SessionState.COMPLETE,
@@ -1008,6 +1058,7 @@ class LiveLabOrchestrator:
             "local controlled endpoint startup began",
         )
         endpoint = record.provider.start_scenario(record.scenario_id)
+        self._record_live_resources(record)
         self._change_state(
             record,
             SessionState.WAITING_FOR_ENDPOINT,
@@ -1032,6 +1083,7 @@ class LiveLabOrchestrator:
             "full-session evidence capture startup began",
         )
         record.session.start_captures()
+        self._record_live_resources(record)
         capture_running = replace(
             record.store.snapshot,
             capture_status=CaptureStatus.RUNNING,
@@ -1231,6 +1283,7 @@ class LiveLabOrchestrator:
             snapshot=cleaning,
             durable=True,
         )
+        self._record_live_resources(record)
         try:
             record.provider.stop_scenario()
         except BaseException as cleanup_error:
@@ -1254,6 +1307,7 @@ class LiveLabOrchestrator:
                 durable=True,
             )
         else:
+            record.ownership_path.unlink(missing_ok=True)
             finished = transition(
                 record.store.snapshot,
                 SessionState.FAILED,
@@ -1272,6 +1326,58 @@ class LiveLabOrchestrator:
                 (),
                 snapshot=finished,
                 durable=True,
+            )
+
+    def _record_live_resources(self, record: _SessionRecord) -> None:
+        if not record.ownership_path.is_file():
+            return
+        for namespace in NAMESPACES:
+            record_resource(record.ownership_path, namespace=namespace)
+        runtime_root = (
+            Path("/run/ipsec-sentinel") / record.store.snapshot.session_id
+        ).resolve()
+        runtime_paths: set[Path] = {runtime_root}
+        pair_files = getattr(record.session.pair, "files", {})
+        if isinstance(pair_files, Mapping):
+            for files in pair_files.values():
+                for attribute in ("socket", "pid", "log"):
+                    candidate = getattr(files, attribute, None)
+                    if candidate is None:
+                        continue
+                    path = Path(candidate).resolve()
+                    if path == runtime_root or runtime_root in path.parents:
+                        runtime_paths.update((path, path.parent))
+        temporary_pcaps = getattr(record.session, "temporary_pcaps", {})
+        if isinstance(temporary_pcaps, Mapping):
+            for candidate in temporary_pcaps.values():
+                path = Path(candidate).resolve()
+                if path == runtime_root or runtime_root in path.parents:
+                    runtime_paths.update((path, path.parent))
+        for path in sorted(runtime_paths, key=lambda item: (len(item.parts), str(item))):
+            record_resource(record.ownership_path, runtime_path=path)
+        process_candidates: list[tuple[str, object]] = []
+        pair_processes = getattr(record.session.pair, "_processes", {})
+        if isinstance(pair_processes, Mapping):
+            process_candidates.extend(
+                (f"strongswan-{name}", process)
+                for name, process in pair_processes.items()
+            )
+        captures = getattr(record.session, "captures", {})
+        if isinstance(captures, Mapping):
+            process_candidates.extend(
+                (f"tcpdump-{name}", capture)
+                for name, capture in captures.items()
+            )
+        for role, resource in process_candidates:
+            pid = getattr(resource, "pid", None)
+            if not isinstance(pid, int) or pid <= 0:
+                continue
+            identity = process_start_identity(pid)
+            if identity is None:
+                continue
+            record_resource(
+                record.ownership_path,
+                process=OwnedProcess(pid, identity, role),
             )
 
     def _append(
