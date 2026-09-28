@@ -4,6 +4,8 @@ import { MemoryRouter } from 'react-router-dom'
 import { describe, expect, it, vi } from 'vitest'
 
 import { AnalysisProvider, type AnalysisServices } from '../../app/AnalysisContext'
+import { LiveLabProvider } from '../../app/LiveLabContext'
+import type { LiveLabServices } from '../../lib/live/types'
 import { AppRoutes } from '../../app/routes'
 import { makeEnvelope } from '../../test/analysisFixture'
 
@@ -36,16 +38,30 @@ function labelPattern(value: string) {
 }
 
 function renderApp(services: Partial<AnalysisServices> = {}, path = '/') {
+  const liveServices: LiveLabServices = {
+    scenarios: async () => ({ scenarios: [], workloads: [] }),
+    createSession: async () => { throw new Error('not used') },
+    getSession: async () => { throw new Error('not used') },
+    command: async () => undefined,
+    subscribe: () => ({ close: () => undefined }),
+  }
   return render(
     <MemoryRouter initialEntries={[path]}>
       <AnalysisProvider services={services}>
-        <AppRoutes />
+        <LiveLabProvider services={liveServices}><AppRoutes /></LiveLabProvider>
       </AnalysisProvider>
     </MemoryRouter>,
   )
 }
 
 describe('guided analysis workspace shell', () => {
+  it('makes Live Lab primary while retaining offline PCAP and Guided Demo entry points', () => {
+    renderApp()
+    expect(screen.getByRole('link', { name: 'Start Live Lab' })).toHaveClass('button-primary')
+    expect(screen.getByRole('button', { name: 'Offline PCAP Analysis' })).toBeVisible()
+    expect(screen.getByRole('button', { name: 'Run Guided Demo' })).toBeVisible()
+  })
+
   it('exposes a semantic PCAP picker and accepts drag/drop analysis', async () => {
     const analyzeCapture = vi.fn(async () => makeEnvelope())
     renderApp({ analyzeCapture })

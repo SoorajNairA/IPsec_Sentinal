@@ -1,6 +1,7 @@
 import { motion } from 'motion/react'
 
 import type { AnalysisV1, XRayProjection } from '../../lib/analysis-contract/types'
+import type { LiveEvent, LiveSession } from '../../lib/live/types'
 import { ProvenanceMark } from '../evidence/ProvenanceMark'
 import './tunnel.css'
 
@@ -8,6 +9,51 @@ type InspectEvidence = (ids: readonly string[], valueLabel?: string) => void
 
 function value(input: unknown): string {
   return input === null || input === undefined || input === 'UNKNOWN' ? 'Unknown' : String(input)
+}
+
+function latestEvent(events: LiveEvent[], type: LiveEvent['type']): LiveEvent | undefined {
+  return [...events].reverse().find((event) => event.type === type)
+}
+
+export function LiveEventTunnel({ session, events }: { session: LiveSession; events: LiveEvent[] }) {
+  const proposal = latestEvent(events, 'ike.proposal.selected')
+  const esp = latestEvent(events, 'esp.observed')
+  const rekey = latestEvent(events, 'child_sa.rekeyed')
+  const active = session.tunnel_status === 'ACTIVE'
+  const encryption = typeof proposal?.data.encryption === 'string' ? proposal.data.encryption : null
+  const dh = typeof proposal?.data.dh_group === 'string' ? proposal.data.dh_group : null
+  const packetDelta = typeof esp?.data.packet_delta === 'number' ? esp.data.packet_delta : 0
+  const byteDelta = typeof esp?.data.byte_delta === 'number' ? esp.data.byte_delta : 0
+  const verification = typeof rekey?.data.verification_state === 'string' ? rekey.data.verification_state : null
+  const afterSpis = Array.isArray(rekey?.data.after_spis) ? rekey.data.after_spis.map(String) : []
+
+  return (
+    <section className={`event-tunnel ${active ? 'is-active' : ''}`} aria-labelledby="live-tunnel-heading">
+      <header>
+        <div><span>PROTECTED PATH</span><h2 id="live-tunnel-heading">Live IPsec tunnel</h2></div>
+        <strong>{active ? 'TUNNEL ACTIVE' : session.state.replaceAll('_', ' ')}</strong>
+      </header>
+      <div className="event-tunnel-stage" role="img" aria-label={active ? 'Active IPsec tunnel between local sandbox and VPN server' : 'IPsec tunnel connecting'}>
+        <div className="event-endpoint"><i /><span>LOCAL SANDBOX</span></div>
+        <div className="event-tunnel-path">
+          <span>{active ? 'IPsec' : 'connecting...'}</span>
+          {packetDelta > 0 && (
+            <div className="event-packet-flow" data-testid="live-esp-flow" aria-label={`${packetDelta} new ESP packets`}>
+              <i>→ ESP →</i><i>← ESP ←</i>
+            </div>
+          )}
+        </div>
+        <div className="event-endpoint"><i /><span>VPN SERVER</span></div>
+      </div>
+      <dl className="event-observations">
+        <div><dt>Encryption</dt><dd>{encryption ?? 'Waiting for negotiation evidence'}</dd></div>
+        <div><dt>Key exchange</dt><dd>{dh ?? 'Waiting for negotiation evidence'}</dd></div>
+        <div><dt>ESP activity</dt><dd>{packetDelta > 0 ? `${packetDelta.toLocaleString()} packets · ${byteDelta.toLocaleString()} bytes` : 'No captured ESP event yet'}</dd></div>
+        <div><dt>Rekey / PFS</dt><dd>{verification === 'enabled' ? 'PFS VERIFIED' : verification === 'disabled' ? 'PFS DISABLED' : 'Waiting for rekey evidence'}</dd></div>
+      </dl>
+      {afterSpis.length > 0 && <p className="live-spi">New CHILD SA SPI <strong>{afterSpis.join(' / ')}</strong></p>}
+    </section>
+  )
 }
 
 export function LiveTunnel({

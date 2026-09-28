@@ -69,6 +69,7 @@ interface AnalysisContextValue {
   closeDemoChooser: () => void
   loadDemo: (id: DemoId) => Promise<void>
   analyzeFile: (file: File) => Promise<void>
+  acceptLiveEnvelope: (input: unknown) => void
   reset: () => void
   navigate: (view: AnalysisView) => void
   selectEvidence: (id: string | null) => void
@@ -151,6 +152,13 @@ export function AnalysisProvider({
     routerNavigate('/analysis/overview')
   }, [routerNavigate])
 
+  const acceptLiveEnvelope = useCallback((input: unknown) => {
+    const validated = parseAnalysisEnvelope(input)
+    setEnvelope(validated)
+    setStatus('READY')
+    setError(null)
+  }, [])
+
   const fail = useCallback((caught: unknown) => {
     const failure = classifyError(caught)
     setError({ code: failure.code, message: failure.message })
@@ -229,6 +237,7 @@ export function AnalysisProvider({
     closeDemoChooser,
     loadDemo,
     analyzeFile,
+    acceptLiveEnvelope,
     reset,
     navigate,
     selectEvidence,
@@ -237,7 +246,7 @@ export function AnalysisProvider({
     setLanguageMode,
   }), [
     status, envelope, demos, stageIndex, error, selectedEvidenceId, evidenceRequest, languageMode,
-    openDemoChooser, closeDemoChooser, loadDemo, analyzeFile, reset, navigate, inspectEvidence, closeEvidence,
+    openDemoChooser, closeDemoChooser, loadDemo, analyzeFile, acceptLiveEnvelope, reset, navigate, inspectEvidence, closeEvidence,
   ])
 
   return <AnalysisContext.Provider value={value}>{children}</AnalysisContext.Provider>

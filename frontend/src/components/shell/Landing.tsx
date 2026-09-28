@@ -1,5 +1,6 @@
 import { useRef, type DragEvent, type KeyboardEvent } from 'react'
 import { Activity, ArrowUpRight, EyeOff, LockKeyhole, Play, ScanSearch, Upload } from 'lucide-react'
+import { Link } from 'react-router-dom'
 
 import { useAnalysis } from '../../app/AnalysisContext'
 import { AnalysisProgress } from './AnalysisProgress'
@@ -41,23 +42,27 @@ export function Landing() {
           <span className="brand-mark" aria-hidden="true"><Activity size={17} strokeWidth={1.8} /></span>
           <span>IPsec Sentinel</span>
         </a>
-        <span className="prototype-label">Forensic workspace · Local</span>
+        <span className="prototype-label">Interactive security lab · Local</span>
       </header>
 
       <main className="landing">
         <section className="hero" aria-labelledby="product-title">
-          <div className="eyebrow"><span />Encrypted traffic intelligence</div>
+          <div className="eyebrow"><span />Live encrypted traffic intelligence</div>
           <h1 id="product-title">IPsec Sentinel</h1>
-          <p className="hero-statement">See what your encrypted tunnel actually reveals.</p>
+          <p className="hero-statement">Build the tunnel. Generate traffic. Watch Sentinel explain it.</p>
           <p className="hero-copy">
-            Reconstruct IKE negotiation, trace Security Associations, and analyze ESP behavior—without decrypting a single payload.
+            Establish a real isolated IPsec session, observe IKE and ESP as they happen, then test traffic intelligence and forward-secrecy evidence yourself.
           </p>
 
           <div className="hero-actions">
-            <button className="button button-primary" type="button" onClick={() => inputRef.current?.click()}>
-              <Upload size={17} />
-              Analyze Capture
+            <Link className="button button-primary" to="/live">
+              <Activity size={17} />
+              Start Live Lab
               <ArrowUpRight className="button-trailing" size={15} />
+            </Link>
+            <button className="button button-secondary" type="button" onClick={() => inputRef.current?.click()}>
+              <Upload size={17} />
+              Offline PCAP Analysis
             </button>
             <button className="button button-secondary" type="button" onClick={() => void openDemoChooser()}>
               <Play size={16} fill="currentColor" />
