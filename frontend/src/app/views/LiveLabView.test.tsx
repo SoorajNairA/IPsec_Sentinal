@@ -114,8 +114,13 @@ describe('Live Lab product flow', () => {
     expect(screen.getByText(/184 new ESP packets/i)).toBeVisible()
     emit(event(7, 'traffic.completed', 'TUNNEL_ACTIVE', { workload: 'video', sequence: 1, seed: 9 }))
     emit(event(8, 'rekey.started', 'REKEYING', { before_spis: ['0x01'] }))
-    emit(event(9, 'child_sa.rekeyed', 'TUNNEL_ACTIVE', { after_spis: ['0x02'], verification_state: 'enabled', observed: { status: 'VERIFIED' } }))
+    emit(event(9, 'child_sa.rekeyed', 'TUNNEL_ACTIVE', {
+      after_spis: { 'gateway-a': ['c1bb57c0', 'cc9290a7'], 'gateway-b': ['cc9290a7', 'c1bb57c0'] },
+      verification_state: 'enabled',
+      observed: { status: 'VERIFIED' },
+    }))
     expect(screen.getByText('PFS VERIFIED')).toBeVisible()
+    expect(screen.getByText(/c1bb57c0 \/ cc9290a7/)).toBeVisible()
 
     const envelope = parseAnalysisEnvelope(makeEnvelope())
     emit(event(10, 'analysis.completed', 'READY', makeEnvelope(), envelope))

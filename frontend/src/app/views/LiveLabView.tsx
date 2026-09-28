@@ -1,4 +1,5 @@
 import { AlertTriangle, BrainCircuit, LockKeyhole, PlugZap } from 'lucide-react'
+import { useEffect } from 'react'
 
 import { useLiveLab } from '../LiveLabContext'
 import { ConnectionTimeline } from '../../components/live/ConnectionTimeline'
@@ -31,6 +32,9 @@ function MysteryComparison({ events }: { events: ReturnType<typeof useLiveLab>['
 export function LiveLabView() {
   const live = useLiveLab()
   const { catalogue, session, events, analysis, problem } = live
+  useEffect(() => {
+    void live.loadCatalogue()
+  }, [live.loadCatalogue])
   if (!session) {
     return (
       <div className="live-lab-start">

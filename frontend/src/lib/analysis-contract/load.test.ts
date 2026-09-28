@@ -43,6 +43,38 @@ describe('analysis contract loading', () => {
     expect(() => parseAnalysisEnvelope({ ...envelope, xray: { ...envelope.xray, version: '2.0' } })).toThrow(/x-ray|version/i)
   })
 
+  it('allows workload-window X-Ray totals to differ from full-session ESP totals', () => {
+    const envelope = makeEnvelope()
+    const packets = envelope.xray.packets.slice(0, 2)
+    const workloadEnvelope = {
+      ...envelope,
+      analysis: {
+        ...envelope.analysis,
+        traffic_intelligence: {
+          ...envelope.analysis.traffic_intelligence,
+          capture_source: 'WORKLOAD_WINDOW',
+          capture_path: '/runs/SNT-1/encrypted.pcap',
+        },
+      },
+      xray: {
+        ...envelope.xray,
+        total_packet_count: 2,
+        displayed_packet_count: 2,
+        sampled: false,
+        duration_seconds: packets[1].relative_time_seconds,
+        packets,
+        capture_source: 'WORKLOAD_WINDOW',
+        capture_path: '/runs/SNT-1/encrypted.pcap',
+      },
+    }
+
+    expect(parseAnalysisEnvelope(workloadEnvelope).xray.total_packet_count).toBe(2)
+    expect(() => parseAnalysisEnvelope({
+      ...workloadEnvelope,
+      xray: { ...workloadEnvelope.xray, capture_path: '/runs/SNT-1/wrong.pcap' },
+    })).toThrow(/x-ray.*path/i)
+  })
+
   it('rejects payload-decryption and calibrated-confidence claims outside v1', () => {
     const base = makeAnalysis()
     expect(() => parseAnalysis({ ...base, esp: { ...base.esp, payload_decrypted: true } })).toThrow()

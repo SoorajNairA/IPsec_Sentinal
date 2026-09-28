@@ -37,9 +37,19 @@ export function parseAnalysisEnvelope(input: unknown): AnalysisEnvelope {
   if (displayed !== packets.length) throw new Error('X-Ray displayed packet count does not match its packet records')
   if (total < displayed) throw new Error('X-Ray total packet count is smaller than its display count')
   if (envelope.xray.sampled !== (displayed !== total)) throw new Error('X-Ray sampling flag contradicts its packet counts')
-  if (total !== analysis.esp.packet_count) throw new Error('X-Ray packet total does not match the analysis ESP total')
-  if (Math.abs(envelope.xray.duration_seconds - analysis.esp.duration_seconds) > 1e-9) {
-    throw new Error('X-Ray duration does not match the analysis ESP duration')
+  const xraySource = envelope.xray.capture_source
+  const trafficSource = analysis.traffic_intelligence.capture_source
+  if (xraySource === 'WORKLOAD_WINDOW') {
+    if (trafficSource !== 'WORKLOAD_WINDOW') throw new Error('X-Ray workload source does not match traffic intelligence')
+    if (envelope.xray.capture_path !== analysis.traffic_intelligence.capture_path) {
+      throw new Error('X-Ray workload path does not match traffic intelligence')
+    }
+  } else {
+    if (xraySource !== undefined) throw new Error('X-Ray capture source is unsupported')
+    if (total !== analysis.esp.packet_count) throw new Error('X-Ray packet total does not match the analysis ESP total')
+    if (Math.abs(envelope.xray.duration_seconds - analysis.esp.duration_seconds) > 1e-9) {
+      throw new Error('X-Ray duration does not match the analysis ESP duration')
+    }
   }
   for (let index = 0; index < packets.length; index += 1) {
     const timestamp = packets[index].relative_time_seconds

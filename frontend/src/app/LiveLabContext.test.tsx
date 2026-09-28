@@ -1,5 +1,5 @@
 import { act, renderHook, waitFor } from '@testing-library/react'
-import type { ReactNode } from 'react'
+import { StrictMode, type ReactNode } from 'react'
 import { describe, expect, it, vi } from 'vitest'
 
 import { makeEnvelope } from '../test/analysisFixture'
@@ -87,5 +87,26 @@ describe('Live Lab reducer and provider', () => {
     await waitFor(() => expect(result.current.session?.state).toBe('TUNNEL_ACTIVE'))
     expect(result.current.latestEventId).toBe(5)
     expect(result.current.events).toHaveLength(5)
+  })
+
+  it('opens only one replay stream while Strict Mode remounts restoration effects', async () => {
+    window.localStorage.setItem('ipsec-sentinel.live-session-id', baseSession.session_id)
+    const subscribe = vi.fn(() => ({ close: vi.fn() }))
+    const services = {
+      scenarios: vi.fn().mockResolvedValue({ scenarios: [], workloads: ['video'] }),
+      createSession: vi.fn().mockResolvedValue(baseSession),
+      getSession: vi.fn().mockResolvedValue(baseSession),
+      command: vi.fn().mockResolvedValue(undefined),
+      subscribe,
+    }
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <StrictMode><LiveLabProvider services={services}>{children}</LiveLabProvider></StrictMode>
+    )
+
+    const { result } = renderHook(() => useLiveLab(), { wrapper })
+
+    await waitFor(() => expect(result.current.session?.session_id).toBe(baseSession.session_id))
+    expect(subscribe).toHaveBeenCalledTimes(1)
+    expect(subscribe).toHaveBeenCalledWith(baseSession.session_id, 0, expect.any(Object), expect.any(Object))
   })
 })

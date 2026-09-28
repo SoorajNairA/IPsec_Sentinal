@@ -500,6 +500,11 @@ class LiveLabOrchestrator:
             if rekey_evidence is not None
             else record.session.refresh_sas()
         )
+        # SecureSession.rekey() deliberately retains its pre-rekey snapshot for
+        # the automated Phase 1 verdict.  Interactive sessions continue after
+        # rekey, so their current SA and XFRM snapshots must describe the same
+        # replacement CHILD_SA.
+        record.session.sas = after_sas
         record.session.collect_xfrm()
         scenario = record.session.scenario
         if scenario is None:
@@ -603,7 +608,7 @@ class LiveLabOrchestrator:
         peers = ("192.0.2.1", "192.0.2.2")
         self._capture_deriver(full_path, workload_path, window, peers)
         ml_summary = self._capture_inspector(workload_path, window, peers)
-        self._write_analysis_evidence(record, capture_evidence, ml_summary)
+        self._write_analysis_evidence(record, workload, capture_evidence, ml_summary)
         envelope = self._analysis_runner(
             full_path,
             model_dir=self._model_dir,
@@ -647,6 +652,7 @@ class LiveLabOrchestrator:
     def _write_analysis_evidence(
         self,
         record: _SessionRecord,
+        workload: WorkloadWindow,
         capture_evidence: object,
         ml_summary: PcapSummary,
     ) -> None:
@@ -690,9 +696,19 @@ class LiveLabOrchestrator:
                 "capture": {
                     "full_evidence_file": "full-evidence.pcap",
                     "ml_input_file": "encrypted.pcap",
+                    "workload_started_unix_ns": workload.started_unix_ns,
+                    "workload_finished_unix_ns": workload.ended_unix_ns,
                     "ml_esp_packets": ml_summary.packet_count,
                     "ml_capture_bytes": ml_summary.capture_bytes,
                     "ml_duration_seconds": ml_summary.duration_seconds,
+                },
+                "traffic": {
+                    "class": workload.workload_id,
+                    "sequence": workload.sequence,
+                    "seed": workload.seed,
+                    "validated": workload.validated,
+                    "generator": workload.metadata.get("generator"),
+                    "generator_version": workload.metadata.get("generator_version"),
                 },
                 "ipsec": {
                     "scenario_id": scenario.id,

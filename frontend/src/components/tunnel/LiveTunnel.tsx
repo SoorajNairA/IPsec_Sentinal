@@ -15,6 +15,15 @@ function latestEvent(events: LiveEvent[], type: LiveEvent['type']): LiveEvent | 
   return [...events].reverse().find((event) => event.type === type)
 }
 
+function rekeySpis(value: unknown): string[] {
+  const values = Array.isArray(value)
+    ? value
+    : value && typeof value === 'object'
+      ? Object.values(value as Record<string, unknown>).flatMap((item) => Array.isArray(item) ? item : [])
+      : []
+  return [...new Set(values.map(String))]
+}
+
 export function LiveEventTunnel({ session, events }: { session: LiveSession; events: LiveEvent[] }) {
   const proposal = latestEvent(events, 'ike.proposal.selected')
   const esp = latestEvent(events, 'esp.observed')
@@ -25,7 +34,7 @@ export function LiveEventTunnel({ session, events }: { session: LiveSession; eve
   const packetDelta = typeof esp?.data.packet_delta === 'number' ? esp.data.packet_delta : 0
   const byteDelta = typeof esp?.data.byte_delta === 'number' ? esp.data.byte_delta : 0
   const verification = typeof rekey?.data.verification_state === 'string' ? rekey.data.verification_state : null
-  const afterSpis = Array.isArray(rekey?.data.after_spis) ? rekey.data.after_spis.map(String) : []
+  const afterSpis = rekeySpis(rekey?.data.after_spis)
 
   return (
     <section className={`event-tunnel ${active ? 'is-active' : ''}`} aria-labelledby="live-tunnel-heading">

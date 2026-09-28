@@ -8,6 +8,7 @@ from typing import Callable
 import json
 import unittest
 
+from ipsec_sentinel.evidence import evaluate_ipsec
 from ipsec_sentinel.live.models import (
     CaptureStatus,
     CleanupStatus,
@@ -78,12 +79,13 @@ class ActionSession(TrafficSession):
             "c2ad5304": "11111111",
             "cbecd5e6": "22222222",
         }
+        after = dict(self.sas)
         for old, new in replacements.items():
-            self.sas = {name: text.replace(old, new) for name, text in self.sas.items()}
+            after = {name: text.replace(old, new) for name, text in after.items()}
             self.xfrm = {name: text.replace(old, new) for name, text in self.xfrm.items()}
         self.rekey_evidence = SimpleNamespace(
             before_sas=before,
-            after_sas=dict(self.sas),
+            after_sas=after,
             log_segment="selected proposal from controlled test",
             attempted=True,
             completed=True,
@@ -253,12 +255,44 @@ class LiveActionTest(unittest.TestCase):
             self.assertEqual(len(windows), 1)
             self.assertEqual((windows[0].started_unix_ns, windows[0].finished_unix_ns), (300, 400))
             self.assertTrue((Path(directory) / session_id / "analysis.json").is_file())
+            truth = json.loads(
+                (Path(directory) / session_id / "ground_truth.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+            self.assertEqual(truth["traffic"]["class"], "video")
+            self.assertEqual(truth["traffic"]["sequence"], 2)
+            self.assertEqual(truth["capture"]["workload_started_unix_ns"], 300)
+            self.assertEqual(truth["capture"]["workload_finished_unix_ns"], 400)
             with self.assertRaises(LiveProblem) as caught:
                 orchestrator.run_traffic(session_id, "email")
             self.assertEqual(caught.exception.code, "CAPTURE_SEALED")
             with self.assertRaises(LiveProblem) as caught:
                 orchestrator.analyze(session_id)
             self.assertEqual(caught.exception.code, "CAPTURE_SEALED")
+
+    def test_rekey_synchronizes_the_live_sa_snapshot_with_post_rekey_xfrm(self) -> None:
+        with TemporaryDirectory() as directory:
+            orchestrator, session_id, session, _ = self.make_connected(directory)
+            before = dict(session.sas)
+
+            orchestrator.trigger_rekey(session_id).result()
+
+            self.assertNotEqual(session.sas, before)
+            self.assertEqual(session.sas, session.rekey_evidence.after_sas)
+            verification = evaluate_ipsec(
+                session.sas,
+                session.xfrm,
+                session.validate_captures(),
+                run_id=session_id,
+                scenario=session.scenario,
+            )
+            failed_xfrm = [
+                check.name
+                for check in verification.checks
+                if check.name.startswith("xfrm.") and not check.passed
+            ]
+            self.assertEqual(failed_xfrm, [])
 
     def test_strict_ml_validation_rejects_a_mixed_capture(self) -> None:
         def contaminate(source: Path, destination: Path, *_args: object) -> object:

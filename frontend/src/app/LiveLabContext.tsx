@@ -190,6 +190,7 @@ export function liveLabReducer(state: LiveLabState, action: LiveLabReducerAction
 }
 
 interface LiveLabContextValue extends LiveLabState {
+  loadCatalogue: () => Promise<void>
   createSession: (scenarioId: string) => Promise<void>
   connect: () => Promise<void>
   runTraffic: (workloadId: string) => Promise<void>
@@ -214,6 +215,7 @@ export function LiveLabProvider({ children, services = defaultLiveLabServices }:
   const [state, dispatch] = useReducer(liveLabReducer, initialState)
   const stateRef = useRef(state)
   const subscriptionRef = useRef<LiveSubscription | null>(null)
+  const catalogueRequestRef = useRef<Promise<void> | null>(null)
   useLayoutEffect(() => {
     stateRef.current = state
   }, [state])
@@ -243,18 +245,37 @@ export function LiveLabProvider({ children, services = defaultLiveLabServices }:
   }, [services])
 
   useEffect(() => {
-    void services.scenarios().then((catalogue) => dispatch({ type: 'CATALOGUE', catalogue })).catch((error: unknown) => {
-      dispatch({ type: 'PROBLEM', problem: toProblem(error) })
-    })
+    let disposed = false
     const storedSessionId = window.localStorage.getItem(STORAGE_KEY)
     if (storedSessionId) {
       void services.getSession(storedSessionId).then((session) => {
+        if (disposed) return
         dispatch({ type: 'SESSION_LOADED', session, replayFromStart: true })
         subscribe(session, 0)
-      }).catch(() => window.localStorage.removeItem(STORAGE_KEY))
+      }).catch(() => {
+        if (!disposed) window.localStorage.removeItem(STORAGE_KEY)
+      })
     }
-    return () => subscriptionRef.current?.close()
+    return () => {
+      disposed = true
+      subscriptionRef.current?.close()
+    }
   }, [services, subscribe])
+
+  const loadCatalogue = useCallback((): Promise<void> => {
+    if (stateRef.current.catalogue) return Promise.resolve()
+    if (catalogueRequestRef.current) return catalogueRequestRef.current
+    const request = services.scenarios().then((catalogue) => {
+      dispatch({ type: 'CATALOGUE', catalogue })
+      dispatch({ type: 'PROBLEM', problem: null })
+    }).catch((error: unknown) => {
+      dispatch({ type: 'PROBLEM', problem: toProblem(error) })
+    }).finally(() => {
+      if (catalogueRequestRef.current === request) catalogueRequestRef.current = null
+    })
+    catalogueRequestRef.current = request
+    return request
+  }, [services])
 
   const createSession = useCallback(async (scenarioId: string) => {
     try {
@@ -294,6 +315,7 @@ export function LiveLabProvider({ children, services = defaultLiveLabServices }:
 
   const value = useMemo<LiveLabContextValue>(() => ({
     ...state,
+    loadCatalogue,
     createSession,
     connect: () => command('CONNECT'),
     runTraffic: (workloadId) => command('TRAFFIC', { workload_id: workloadId }),
@@ -304,7 +326,7 @@ export function LiveLabProvider({ children, services = defaultLiveLabServices }:
     disconnect: () => command('DISCONNECT'),
     reconnect,
     reset,
-  }), [state, createSession, command, reconnect, reset])
+  }), [state, loadCatalogue, createSession, command, reconnect, reset])
 
   return <LiveLabContext.Provider value={value}>{children}</LiveLabContext.Provider>
 }

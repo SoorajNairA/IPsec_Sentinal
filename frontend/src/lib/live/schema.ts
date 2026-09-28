@@ -26,15 +26,20 @@ export const LIVE_EVENT_TYPES = [
 
 const jsonRecord = z.record(z.string(), z.unknown())
 const isoTimestamp = z.string().min(1).refine((value) => Number.isFinite(Date.parse(value)), 'invalid timestamp')
+// Python records 64-bit seeds and epoch nanoseconds. JSON numbers preserve
+// their magnitude in the browser but not exact precision above 2^53; the UI
+// treats these fields as opaque audit metadata and never computes with them.
+const auditInteger = z.number().refine(Number.isInteger, 'Expected an integer')
+const auditNonnegativeInteger = auditInteger.refine((value) => value >= 0, 'Expected a non-negative integer')
 
 const workloadWindowSchema = z.object({
   sequence: z.number().int().positive(),
   workload_id: z.string().min(1),
-  seed: z.number().int(),
+  seed: auditNonnegativeInteger,
   started_at: isoTimestamp,
   ended_at: isoTimestamp,
-  started_unix_ns: z.number().int().nonnegative(),
-  ended_unix_ns: z.number().int().nonnegative(),
+  started_unix_ns: auditNonnegativeInteger,
+  ended_unix_ns: auditNonnegativeInteger,
   validated: z.boolean(),
   metadata: jsonRecord,
 }).strict()

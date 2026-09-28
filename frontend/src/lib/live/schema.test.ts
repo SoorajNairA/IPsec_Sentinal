@@ -57,6 +57,30 @@ describe('Live Lab wire schema', () => {
     expect(parseLiveEvent(event({ type, ...(data ? { data } : {}) })).type).toBe(type)
   })
 
+  it('accepts backend 64-bit workload seeds and nanosecond audit timestamps', () => {
+    const parsed = parseLiveSession(session({
+      state: 'TUNNEL_ACTIVE',
+      tunnel_status: 'ACTIVE',
+      capture_status: 'RUNNING',
+      child_sa_established: true,
+      latest_completed_workload_sequence: 1,
+      completed_workloads: [{
+        sequence: 1,
+        workload_id: 'video',
+        seed: Number('5041830736788146658'),
+        started_at: '2026-09-28T18:34:30.184Z',
+        ended_at: '2026-09-28T18:34:35.600Z',
+        started_unix_ns: Number('1790620470184454632'),
+        ended_unix_ns: Number('1790620475600557782'),
+        validated: true,
+        metadata: { generator: 'local-segmented-video' },
+      }],
+      allowed_actions: ['TRAFFIC', 'REKEY', 'REFRESH', 'ANALYZE', 'DISCONNECT'],
+    }))
+
+    expect(parsed.completed_workloads[0]?.workload_id).toBe('video')
+  })
+
   it('rejects unknown event types, status values, and unsafe JSON object keys', () => {
     expect(() => parseLiveEvent(event({ type: 'progress.fabricated' }))).toThrow(/type|option/i)
     expect(() => parseLiveSession(session({ tunnel_status: 'MAYBE' }))).toThrow()
