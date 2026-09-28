@@ -2,9 +2,10 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
-from dataclasses import dataclass, replace
+from dataclasses import asdict, dataclass, field, replace
+from datetime import datetime, timezone
 from pathlib import Path
-from secrets import choice, token_hex
+from secrets import choice, randbits, token_hex
 from threading import Event, Thread
 from typing import TextIO
 
@@ -17,12 +18,16 @@ from ipsec_sentinel.live.models import (
     LiveSessionSnapshot,
     SessionState,
     TunnelStatus,
+    WorkloadWindow,
     transition,
     validate_action,
 )
 from ipsec_sentinel.live.observations import (
+    EspSummary,
+    EspTotals,
     LiveObservation,
     StrongSwanObservationParser,
+    summarize_esp,
 )
 from ipsec_sentinel.live.provider import (
     LabProvider,
@@ -31,10 +36,22 @@ from ipsec_sentinel.live.provider import (
     VALIDATED_SCENARIOS,
 )
 from ipsec_sentinel.session import SecureSession
+from ipsec_sentinel.artifacts import write_json_atomic
+from ipsec_sentinel.traffic import register_builtin_generators
+from ipsec_sentinel.traffic.base import (
+    SUPERVISED_CLASS_ALLOWLIST,
+    TrafficContext,
+    TrafficGenerator,
+    TrafficRunResult,
+    TrafficValidation,
+    create_generator,
+)
 
 
 SessionFactory = Callable[..., SecureSession]
 ProviderFactory = Callable[[SecureSession], LabProvider]
+GeneratorFactory = Callable[[str, int], TrafficGenerator]
+EspSummarizer = Callable[[Path, EspTotals], EspSummary | None]
 
 
 @dataclass
@@ -45,6 +62,15 @@ class _SessionRecord:
     provider: LabProvider
     store: EventStore
     log: TextIO
+    next_workload_sequence: int = 1
+    esp_totals: EspTotals = field(default_factory=EspTotals.empty)
+
+
+class _RecoveredTrafficFailure(Exception):
+    def __init__(self, cause: BaseException, workload_id: str) -> None:
+        super().__init__(str(cause))
+        self.cause = cause
+        self.workload_id = workload_id
 
 
 def _default_session_factory(
@@ -59,6 +85,19 @@ def _default_id() -> str:
     return f"SNT-{token_hex(4).upper()}"
 
 
+def _default_generator_factory(name: str, seed: int) -> TrafficGenerator:
+    register_builtin_generators()
+    return create_generator(name, seed)
+
+
+def _iso_from_ns(value: int) -> str:
+    return (
+        datetime.fromtimestamp(value / 1_000_000_000, timezone.utc)
+        .isoformat(timespec="milliseconds")
+        .replace("+00:00", "Z")
+    )
+
+
 class LiveLabOrchestrator:
     def __init__(
         self,
@@ -69,6 +108,10 @@ class LiveLabOrchestrator:
         executor: Executor | None = None,
         id_factory: Callable[[], str] = _default_id,
         mystery_selector: Callable[[Sequence[str]], str] = choice,
+        generator_factory: GeneratorFactory = _default_generator_factory,
+        seed_factory: Callable[[], int] = lambda: randbits(63),
+        time_ns: Callable[[], int] = __import__("time").time_ns,
+        esp_summarizer: EspSummarizer = summarize_esp,
     ) -> None:
         self.root_dir = Path(root_dir)
         self.root_dir.mkdir(parents=True, exist_ok=True, mode=0o750)
@@ -80,6 +123,10 @@ class LiveLabOrchestrator:
         )
         self._id_factory = id_factory
         self._mystery_selector = mystery_selector
+        self._generator_factory = generator_factory
+        self._seed_factory = seed_factory
+        self._time_ns = time_ns
+        self._esp_summarizer = esp_summarizer
         self._records: dict[str, _SessionRecord] = {}
         self._active_id: str | None = None
         self._mystery_index = 0
@@ -190,13 +237,26 @@ class LiveLabOrchestrator:
     def events(self, session_id: str, after_id: int) -> tuple[LiveEvent, ...]:
         return self._record(session_id).store.replay(after_id)
 
+    def run_traffic(self, session_id: str, workload_id: str) -> Future[object]:
+        if workload_id not in SUPERVISED_CLASS_ALLOWLIST:
+            raise LiveProblem(
+                "WORKLOAD_NOT_ALLOWED",
+                "Select one of the controlled supervised workloads.",
+                http_status=400,
+                session_id=session_id,
+            )
+        return self.submit(
+            session_id,
+            LiveAction.TRAFFIC,
+            {"workload_id": workload_id},
+        )
+
     def submit(
         self,
         session_id: str,
         action: LiveAction | str,
         payload: Mapping[str, object],
     ) -> Future[object]:
-        del payload
         record = self._record(session_id)
         try:
             normalized_action = (
@@ -210,7 +270,7 @@ class LiveLabOrchestrator:
                 session_id=session_id,
             ) from error
         validate_action(record.store.snapshot, normalized_action)
-        if normalized_action is not LiveAction.CONNECT:
+        if normalized_action not in (LiveAction.CONNECT, LiveAction.TRAFFIC):
             raise LiveProblem(
                 "ACTION_NOT_IMPLEMENTED",
                 "This Live Lab action is not available yet.",
@@ -231,12 +291,39 @@ class LiveLabOrchestrator:
             durable=True,
         )
         return self._executor.submit(
-            lambda: self._run_action(record, normalized_action)
+            lambda: self._run_action(record, normalized_action, dict(payload))
         )
 
-    def _run_action(self, record: _SessionRecord, action: LiveAction) -> None:
+    def _run_action(
+        self,
+        record: _SessionRecord,
+        action: LiveAction,
+        payload: Mapping[str, object],
+    ) -> None:
         try:
-            self._connect(record)
+            if action is LiveAction.CONNECT:
+                self._connect(record)
+            elif action is LiveAction.TRAFFIC:
+                workload_id = str(payload.get("workload_id", ""))
+                self._run_traffic(record, workload_id)
+            else:
+                raise AssertionError(f"unhandled action: {action.value}")
+        except _RecoveredTrafficFailure as recovered:
+            cleared = replace(
+                record.store.snapshot,
+                active_action=None,
+                state_reason=f"{recovered.workload_id} workload failed; tunnel reverified",
+            )
+            record.store.append(
+                "action.failed",
+                cleared.state,
+                cleared.state_reason,
+                {"action": action.value, "workload": recovered.workload_id},
+                (),
+                snapshot=cleared,
+                durable=True,
+            )
+            raise recovered.cause
         except BaseException as error:
             self._fail_and_cleanup(record, action, error)
             raise
@@ -254,6 +341,184 @@ class LiveLabOrchestrator:
             snapshot=completed,
             durable=True,
         )
+
+    def _run_traffic(self, record: _SessionRecord, workload_id: str) -> None:
+        if workload_id not in SUPERVISED_CLASS_ALLOWLIST:
+            raise LiveProblem(
+                "WORKLOAD_NOT_ALLOWED",
+                "Select one of the controlled supervised workloads.",
+                http_status=400,
+                session_id=record.store.snapshot.session_id,
+            )
+        sequence = record.next_workload_sequence
+        record.next_workload_sequence += 1
+        seed = self._seed_factory()
+        generator = self._generator_factory(workload_id, seed)
+        traffic_dir = record.session.run_dir / "traffic" / f"{sequence:04d}"
+        traffic_dir.mkdir(parents=True, exist_ok=False, mode=0o750)
+        context = TrafficContext(
+            traffic_dir,
+            record.log,
+            seed,
+            record.scenario_id,
+            "clean",
+        )
+        self._change_state(
+            record,
+            SessionState.TRAFFIC_RUNNING,
+            "traffic.preparing",
+            f"{workload_id} generator preparation started",
+        )
+        started_ns = 0
+        ended_ns = 0
+        result: TrafficRunResult | None = None
+        validation: TrafficValidation | None = None
+        primary_error: BaseException | None = None
+        cleanup_error: BaseException | None = None
+        try:
+            generator.prepare(context)
+            started_ns = self._time_ns()
+            self._append(
+                record,
+                "traffic.started",
+                f"{workload_id} protected workload started",
+                {"workload": workload_id, "sequence": sequence, "seed": seed},
+            )
+            result = generator.run(context)
+            validation = generator.validate(context, result)
+            ended_ns = self._time_ns()
+            if not validation.passed:
+                raise RuntimeError(
+                    "traffic validation failed: " + "; ".join(validation.errors)
+                )
+        except BaseException as error:
+            primary_error = error
+            if started_ns and not ended_ns:
+                ended_ns = self._time_ns()
+        finally:
+            try:
+                generator.cleanup(context)
+            except BaseException as error:
+                cleanup_error = error
+        if primary_error is None and cleanup_error is not None:
+            primary_error = cleanup_error
+
+        metadata = generator.metadata()
+        traffic_payload: dict[str, object] = {
+            "schema": "ipsec-sentinel.live-traffic/v1",
+            "session_id": record.store.snapshot.session_id,
+            "sequence": sequence,
+            "workload": workload_id,
+            "generator": metadata.get("generator", generator.name),
+            "generator_version": metadata.get("version", generator.version),
+            "seed": seed,
+            "parameters": dict(metadata.get("parameters", {})),
+            "started_at": None if not started_ns else _iso_from_ns(started_ns),
+            "ended_at": None if not ended_ns else _iso_from_ns(ended_ns),
+            "started_unix_ns": started_ns,
+            "ended_unix_ns": ended_ns,
+            "result": None if result is None else dict(result.metrics),
+            "validation": None if validation is None else asdict(validation),
+            "cleanup": {
+                "status": "FAILED" if cleanup_error is not None else "SUCCEEDED",
+                "exception_type": (
+                    None if cleanup_error is None else type(cleanup_error).__name__
+                ),
+            },
+            "status": "FAILED" if primary_error is not None else "PASS",
+        }
+        write_json_atomic(traffic_dir / "traffic.json", traffic_payload)
+
+        if primary_error is not None:
+            if self._traffic_tunnel_healthy(record):
+                recovered = transition(
+                    record.store.snapshot,
+                    SessionState.TUNNEL_ACTIVE,
+                    f"{workload_id} failed; tunnel health was independently reverified",
+                )
+                record.store.append(
+                    "traffic.failed",
+                    recovered.state,
+                    recovered.state_reason,
+                    {
+                        "workload": workload_id,
+                        "sequence": sequence,
+                        "exception_type": type(primary_error).__name__,
+                    },
+                    (),
+                    snapshot=recovered,
+                    durable=True,
+                )
+                raise _RecoveredTrafficFailure(primary_error, workload_id)
+            raise primary_error
+
+        assert validation is not None and result is not None
+        snapshot_path = traffic_dir / "capture-snapshot.pcap"
+        record.session.capture_snapshot(snapshot_path)
+        summary = self._esp_summarizer(snapshot_path, record.esp_totals)
+        if summary is not None:
+            record.esp_totals = summary.totals
+            self._append(
+                record,
+                "esp.observed",
+                "new protected ESP packets were parsed from the live capture",
+                summary.to_dict(),
+                ({"source": "capture", "record": "ESP delta"},),
+            )
+        workload = WorkloadWindow(
+            sequence=sequence,
+            workload_id=workload_id,
+            seed=seed,
+            started_at=_iso_from_ns(started_ns),
+            ended_at=_iso_from_ns(ended_ns),
+            started_unix_ns=started_ns,
+            ended_unix_ns=ended_ns,
+            validated=True,
+            metadata={
+                "generator": traffic_payload["generator"],
+                "generator_version": traffic_payload["generator_version"],
+                "parameters": traffic_payload["parameters"],
+                "result": traffic_payload["result"],
+                "validation": traffic_payload["validation"],
+            },
+        )
+        completed = transition(
+            record.store.snapshot,
+            SessionState.TUNNEL_ACTIVE,
+            f"{workload_id} workload completed and validated",
+        )
+        completed = replace(
+            completed,
+            completed_workloads=(*completed.completed_workloads, workload),
+            latest_completed_workload_sequence=sequence,
+        )
+        record.store.append(
+            "traffic.completed",
+            completed.state,
+            completed.state_reason,
+            {
+                "workload": workload_id,
+                "sequence": sequence,
+                "seed": seed,
+                "validation": asdict(validation),
+            },
+            (),
+            snapshot=completed,
+            durable=True,
+        )
+
+    def _traffic_tunnel_healthy(self, record: _SessionRecord) -> bool:
+        try:
+            if not bool(record.provider.health().get("ready")):
+                return False
+            sas = record.session.refresh_sas()
+            xfrm = record.session.collect_xfrm()
+            primary = getattr(record.session, "captures", {}).get("primary")
+            if primary is not None and not bool(primary.running):
+                return False
+            return bool(sas) and bool(xfrm)
+        except BaseException:
+            return False
 
     def _connect(self, record: _SessionRecord) -> None:
         self._change_state(
