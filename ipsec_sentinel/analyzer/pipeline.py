@@ -83,12 +83,30 @@ def _infer_peers(capture, peer_pairs: list[list[str]]) -> dict[str, Any]:
     }
 
 
+def _unknown_workload_traffic(reason: str, path: Path) -> dict[str, object]:
+    return {
+        "state": "UNKNOWN",
+        "predicted_class": "UNKNOWN",
+        "raw_confidence": None,
+        "confidence_kind": "raw_uncalibrated",
+        "probabilities": {},
+        "provenance": "UNKNOWN",
+        "model_version": "UNKNOWN",
+        "feature_schema_version": "ipsec-sentinel.esp-session-features/v1",
+        "payload_decrypted": False,
+        "reason": reason,
+        "capture_source": "WORKLOAD_WINDOW",
+        "capture_path": str(path),
+    }
+
+
 def analyze_capture(
     path: Path,
     *,
     model_dir: Path = Path("model"),
     low_confidence_threshold: float = 0.60,
     evidence_dir: Path | None = None,
+    traffic_capture_path: Path | None = None,
 ) -> dict[str, Any]:
     path = Path(path)
     result = _base(path)
@@ -104,10 +122,63 @@ def analyze_capture(
     ike, ike_evidence = analyze_ike(capture)
     associations, sa_evidence = reconstruct_security_associations(capture)
     esp, observations, esp_evidence = analyze_esp(capture)
-    traffic = infer_traffic(
-        observations, model_dir,
-        low_confidence_threshold=low_confidence_threshold,
-    )
+    traffic_limitation: dict[str, str] | None = None
+    if traffic_capture_path is None:
+        traffic = infer_traffic(
+            observations, model_dir,
+            low_confidence_threshold=low_confidence_threshold,
+        )
+    else:
+        workload_path = Path(traffic_capture_path)
+        try:
+            workload_capture = parse_capture(workload_path)
+        except (CaptureError, OSError) as error:
+            description = f"Workload capture unavailable: {error}"
+            traffic = _unknown_workload_traffic(description, workload_path)
+            traffic_limitation = {
+                "code": "TRAFFIC_CAPTURE_ERROR",
+                "description": description,
+            }
+        else:
+            _, workload_observations, _ = analyze_esp(workload_capture)
+            full_peer_pair = esp.get("peer_pair")
+            has_non_esp = any(
+                packet.kind != "ESP" or packet.natt
+                for packet in workload_capture.packets
+            )
+            has_wrong_peer = bool(full_peer_pair) and any(
+                {packet.source, packet.destination} != set(full_peer_pair)
+                for packet in workload_capture.packets
+            )
+            if has_non_esp:
+                description = "Workload capture must contain native ESP packets only."
+                traffic = _unknown_workload_traffic(description, workload_path)
+                traffic_limitation = {
+                    "code": "TRAFFIC_CAPTURE_NO_ESP",
+                    "description": description,
+                }
+            elif has_wrong_peer:
+                description = "Workload capture ESP peers do not match the full session."
+                traffic = _unknown_workload_traffic(description, workload_path)
+                traffic_limitation = {
+                    "code": "TRAFFIC_CAPTURE_WRONG_PEER",
+                    "description": description,
+                }
+            elif not workload_observations:
+                description = "Workload capture contains no ESP packets."
+                traffic = _unknown_workload_traffic(description, workload_path)
+                traffic_limitation = {
+                    "code": "TRAFFIC_CAPTURE_NO_ESP",
+                    "description": description,
+                }
+            else:
+                traffic = infer_traffic(
+                    workload_observations,
+                    model_dir,
+                    low_confidence_threshold=low_confidence_threshold,
+                )
+                traffic["capture_source"] = "WORKLOAD_WINDOW"
+                traffic["capture_path"] = str(workload_path)
     sidecar_dir = path.parent if evidence_dir is None else Path(evidence_dir)
     controlled, controlled_pfs, controlled_items = load_controlled_evidence(sidecar_dir, path.name)
     evidence: list[Evidence] = [*protocol_evidence, *ike_evidence, *sa_evidence, *esp_evidence, *controlled_items]
@@ -121,9 +192,14 @@ def analyze_capture(
         if identifier in evidence_ids:
             ike[field]["evidence_id"] = identifier
     if traffic["state"] in ("PREDICTED", "LOW_CONFIDENCE"):
+        inference_scope = (
+            " in the workload-only ESP capture"
+            if traffic_capture_path is not None
+            else ""
+        )
         evidence.append(Evidence(
             "ev-traffic-inference-001", "AI_INFERRED",
-            f"Traffic classified as {traffic['predicted_class']} from encrypted ESP behavior",
+            f"Traffic classified as {traffic['predicted_class']} from encrypted ESP behavior{inference_scope}",
             protocol="ESP", raw_value=traffic["predicted_class"],
             normalized_value=traffic["predicted_class"], source_component="ml-classifier",
             confidence=float(traffic["raw_confidence"]),
@@ -165,6 +241,16 @@ def analyze_capture(
         limitations.append({"code": "TRAFFIC_UNKNOWN", "description": str(traffic["reason"])})
     else:
         limitations.append({"code": "MODEL_SCOPE", "description": "Traffic confidence is raw, uncalibrated, and based on a controlled synthetic testbed."})
+    if traffic_limitation is not None:
+        limitations.append(traffic_limitation)
+    elif traffic_capture_path is not None:
+        limitations.append({
+            "code": "TRAFFIC_WINDOW_SCOPE",
+            "description": (
+                "Traffic intelligence and X-Ray use the workload-only ESP capture; "
+                "protocol and security analysis use the full session capture."
+            ),
+        })
     result["limitations"] = limitations
     validate_analysis(result)
     return result

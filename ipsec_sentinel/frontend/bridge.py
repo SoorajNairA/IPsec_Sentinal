@@ -33,8 +33,12 @@ class FrontendServerConfig:
             raise ValueError("max_upload_bytes must be positive")
 
 
-def _empty_xray() -> dict[str, object]:
-    return {
+def _empty_xray(
+    *,
+    capture_source: str | None = None,
+    capture_path: Path | None = None,
+) -> dict[str, object]:
+    projection: dict[str, object] = {
         "schema_id": XRAY_SCHEMA_ID,
         "version": XRAY_VERSION,
         "total_packet_count": 0,
@@ -44,6 +48,10 @@ def _empty_xray() -> dict[str, object]:
         "peer_pair": None,
         "packets": [],
     }
+    if capture_source is not None:
+        projection["capture_source"] = capture_source
+        projection["capture_path"] = str(capture_path)
+    return projection
 
 
 def analyze_for_frontend(
@@ -52,17 +60,33 @@ def analyze_for_frontend(
     model_dir: Path,
     evidence_dir: Path | None = None,
     max_points: int = 1_500,
+    traffic_capture_path: Path | None = None,
 ) -> dict[str, object]:
     analysis = analyze_capture(
         Path(path),
         model_dir=Path(model_dir),
         evidence_dir=evidence_dir,
+        traffic_capture_path=traffic_capture_path,
     )
-    xray = (
-        build_xray_projection(Path(path), max_points=max_points)
-        if analysis["summary"]["status"] == "COMPLETE"
-        else _empty_xray()
-    )
+    xray_path = Path(path) if traffic_capture_path is None else Path(traffic_capture_path)
+    xray_source = None if traffic_capture_path is None else "WORKLOAD_WINDOW"
+    if analysis["summary"]["status"] == "COMPLETE":
+        try:
+            xray = build_xray_projection(
+                xray_path,
+                max_points=max_points,
+                capture_source=xray_source,
+            )
+        except (OSError, ValueError):
+            xray = _empty_xray(
+                capture_source=xray_source,
+                capture_path=xray_path,
+            )
+    else:
+        xray = _empty_xray(
+            capture_source=xray_source,
+            capture_path=xray_path if xray_source is not None else None,
+        )
     return {"analysis": analysis, "xray": xray}
 
 

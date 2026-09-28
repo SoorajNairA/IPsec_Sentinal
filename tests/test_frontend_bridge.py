@@ -173,6 +173,43 @@ class FrontendBridgeTest(unittest.TestCase):
         self.assertEqual(envelope["analysis"]["schema_id"], "ipsec-sentinel.analysis/v1")
         self.assertEqual(envelope["xray"]["schema_id"], "ipsec-sentinel.xray/v1")
 
+    def test_analysis_function_uses_workload_window_for_xray_and_inference_only(self) -> None:
+        full_path = Path("tests/fixtures/ike-esp.pcap")
+        workload_path = Path("tests/fixtures/esp-only.pcap")
+
+        envelope = analyze_for_frontend(
+            full_path,
+            model_dir=Path("missing-model"),
+            traffic_capture_path=workload_path,
+        )
+
+        self.assertTrue(envelope["analysis"]["protocols"]["ike_detected"])
+        self.assertEqual(
+            envelope["analysis"]["traffic_intelligence"]["capture_source"],
+            "WORKLOAD_WINDOW",
+        )
+        self.assertEqual(
+            envelope["xray"]["total_packet_count"],
+            analyze_capture(workload_path, model_dir=Path("missing-model"))["esp"]["packet_count"],
+        )
+        self.assertEqual(envelope["xray"]["capture_source"], "WORKLOAD_WINDOW")
+        self.assertEqual(envelope["xray"]["capture_path"], str(workload_path))
+
+    def test_invalid_workload_window_keeps_protocol_analysis_and_returns_empty_xray(self) -> None:
+        with TemporaryDirectory() as directory:
+            invalid = Path(directory) / "invalid.pcap"
+            invalid.write_bytes(b"broken")
+            envelope = analyze_for_frontend(
+                Path("tests/fixtures/ike-esp.pcap"),
+                model_dir=Path("missing-model"),
+                traffic_capture_path=invalid,
+            )
+
+        self.assertTrue(envelope["analysis"]["protocols"]["ike_detected"])
+        self.assertEqual(envelope["analysis"]["traffic_intelligence"]["state"], "UNKNOWN")
+        self.assertEqual(envelope["xray"]["total_packet_count"], 0)
+        self.assertEqual(envelope["xray"]["capture_source"], "WORKLOAD_WINDOW")
+
     def test_health_upload_and_spa_fallback(self) -> None:
         with TemporaryDirectory() as directory:
             static = Path(directory)

@@ -88,6 +88,7 @@ def build_xray_projection(
     path: Path,
     *,
     max_points: int = 1_500,
+    capture_source: str | None = None,
 ) -> dict[str, object]:
     """Project observable ESP timing, size, and direction for visualization."""
 
@@ -101,7 +102,7 @@ def build_xray_projection(
         }
         for index in indices
     ]
-    return {
+    projection: dict[str, object] = {
         "schema_id": XRAY_SCHEMA_ID,
         "version": XRAY_VERSION,
         "total_packet_count": len(observations),
@@ -111,3 +112,7 @@ def build_xray_projection(
         "peer_pair": esp["peer_pair"],
         "packets": packets,
     }
+    if capture_source is not None:
+        projection["capture_source"] = capture_source
+        projection["capture_path"] = str(path)
+    return projection

@@ -28,6 +28,25 @@ class AnalyzerRealPcapTest(unittest.TestCase):
                 self.assertEqual(result["pfs"]["state"], pfs)
                 self.assertGreater(result["esp"]["packet_count"], 0)
 
+    def test_full_evidence_and_encrypted_window_have_separate_roles(self) -> None:
+        root = Path(DATASET) / "runs" / "run_000013"
+        result = analyze_capture(
+            root / "full-evidence.pcap",
+            model_dir=Path(MODEL or "missing-model"),
+            traffic_capture_path=root / "encrypted.pcap",
+        )
+
+        self.assertTrue(result["protocols"]["ike_detected"])
+        self.assertGreater(result["protocols"]["ike_packets"], 0)
+        self.assertEqual(
+            result["traffic_intelligence"]["capture_source"],
+            "WORKLOAD_WINDOW",
+        )
+        self.assertEqual(
+            result["traffic_intelligence"]["capture_path"],
+            str(root / "encrypted.pcap"),
+        )
+
     @unittest.skipUnless(MODEL, "set IPSEC_SENTINEL_MODEL_DIR for real inference")
     def test_real_encrypted_workload_invokes_existing_model(self) -> None:
         root = Path(DATASET)
