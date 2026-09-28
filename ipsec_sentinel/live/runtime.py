@@ -10,6 +10,7 @@ import fcntl
 import json
 import os
 import signal
+import stat
 import subprocess
 
 from ipsec_sentinel.artifacts import write_json_atomic
@@ -360,11 +361,14 @@ def recover_stale_runtime(
 
 
 def _remove_exact_path(path: Path) -> None:
-    if path.is_symlink() or path.is_file():
-        path.unlink(missing_ok=True)
+    try:
+        mode = path.lstat().st_mode
+    except FileNotFoundError:
         return
-    if path.is_dir():
+    if stat.S_ISDIR(mode):
         path.rmdir()
+        return
+    path.unlink(missing_ok=True)
 
 
 def _terminate_process(pid: int) -> None:

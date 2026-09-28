@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import json
+import socket
 import unittest
 
 from ipsec_sentinel.live.runtime import (
@@ -101,6 +102,37 @@ class LiveRuntimeTest(unittest.TestCase):
             self.assertEqual(second.status, "NO_RECORD")
             self.assertEqual(terminated, [77])
             self.assertEqual(namespaces, ["ips-gwa"])
+
+    def test_stale_recovery_unlinks_owned_unix_socket_before_directory(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "runtime"
+            runtime.mkdir()
+            socket_path = runtime / "charon.vici"
+            bound = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            try:
+                bound.bind(str(socket_path))
+            finally:
+                bound.close()
+            ownership_path = root / "runtime-ownership.json"
+            RuntimeOwnership(
+                session_id="SNT-SOCKET01",
+                owner_pid=10,
+                owner_start_identity="dead-owner",
+                runtime_paths=(str(socket_path), str(runtime)),
+            ).write(ownership_path)
+
+            report = recover_stale_runtime(
+                ownership_path,
+                runtime_roots=(runtime,),
+                read_process_identity=lambda _pid: None,
+                terminate_process=lambda _pid: None,
+                reset_namespace=lambda _name: None,
+            )
+
+            self.assertEqual(report.status, "RECOVERED")
+            self.assertFalse(socket_path.exists())
+            self.assertFalse(runtime.exists())
 
     def test_reused_pid_identity_is_never_terminated(self) -> None:
         with TemporaryDirectory() as directory:
