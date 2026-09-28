@@ -13,6 +13,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--model-dir", type=Path, required=True)
     parser.add_argument("--port", type=int, default=8_787)
     parser.add_argument("--max-upload-bytes", type=int, default=268_435_456)
+    parser.add_argument("--enable-live-lab", action="store_true")
+    parser.add_argument("--live-runs-dir", type=Path, default=Path("runs/live"))
     return parser
 
 
@@ -23,6 +25,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         model_dir=args.model_dir,
         port=args.port,
         max_upload_bytes=args.max_upload_bytes,
+        enable_live_lab=args.enable_live_lab,
+        live_runs_dir=args.live_runs_dir,
     ))
     return 0
 

@@ -48,7 +48,6 @@ from ipsec_sentinel.session import SecureSession
 from ipsec_sentinel.artifacts import write_json_atomic, write_text_atomic
 from ipsec_sentinel.dataset.models import WorkloadWindow as DatasetWorkloadWindow
 from ipsec_sentinel.evidence import evaluate_ipsec, parse_sa
-from ipsec_sentinel.frontend.bridge import analyze_for_frontend
 from ipsec_sentinel.pcap import PcapSummary, derive_workload_esp, inspect_ml_pcap
 from ipsec_sentinel.scenario import negotiated_policy
 from ipsec_sentinel.traffic import register_builtin_generators
@@ -110,6 +109,12 @@ def _default_generator_factory(name: str, seed: int) -> TrafficGenerator:
     return create_generator(name, seed)
 
 
+def _default_analysis_runner(*args: object, **kwargs: object) -> dict[str, object]:
+    from ipsec_sentinel.frontend.bridge import analyze_for_frontend
+
+    return analyze_for_frontend(*args, **kwargs)  # type: ignore[arg-type]
+
+
 def _iso_from_ns(value: int) -> str:
     return (
         datetime.fromtimestamp(value / 1_000_000_000, timezone.utc)
@@ -152,7 +157,7 @@ class LiveLabOrchestrator:
         esp_summarizer: EspSummarizer = summarize_esp,
         capture_deriver: CaptureDeriver = derive_workload_esp,
         capture_inspector: CaptureInspector = inspect_ml_pcap,
-        analysis_runner: AnalysisRunner = analyze_for_frontend,
+        analysis_runner: AnalysisRunner = _default_analysis_runner,
         model_dir: Path = Path("model"),
     ) -> None:
         self.root_dir = Path(root_dir)
@@ -320,6 +325,14 @@ class LiveLabOrchestrator:
 
     def events(self, session_id: str, after_id: int) -> tuple[LiveEvent, ...]:
         return self._record(session_id).store.replay(after_id)
+
+    def wait_events(
+        self,
+        session_id: str,
+        after_id: int,
+        timeout: float,
+    ) -> tuple[LiveEvent, ...]:
+        return self._record(session_id).store.wait(after_id, timeout)
 
     def run_traffic(self, session_id: str, workload_id: str) -> Future[object]:
         if workload_id not in SUPERVISED_CLASS_ALLOWLIST:
