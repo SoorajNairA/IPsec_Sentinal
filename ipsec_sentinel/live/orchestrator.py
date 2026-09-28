@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Mapping, Sequence
 from concurrent.futures import Executor, Future, ThreadPoolExecutor
+from copy import deepcopy
 from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
@@ -36,7 +37,12 @@ from ipsec_sentinel.live.provider import (
     VALIDATED_SCENARIOS,
 )
 from ipsec_sentinel.session import SecureSession
-from ipsec_sentinel.artifacts import write_json_atomic
+from ipsec_sentinel.artifacts import write_json_atomic, write_text_atomic
+from ipsec_sentinel.dataset.models import WorkloadWindow as DatasetWorkloadWindow
+from ipsec_sentinel.evidence import evaluate_ipsec, parse_sa
+from ipsec_sentinel.frontend.bridge import analyze_for_frontend
+from ipsec_sentinel.pcap import PcapSummary, derive_workload_esp, inspect_ml_pcap
+from ipsec_sentinel.scenario import negotiated_policy
 from ipsec_sentinel.traffic import register_builtin_generators
 from ipsec_sentinel.traffic.base import (
     SUPERVISED_CLASS_ALLOWLIST,
@@ -52,6 +58,9 @@ SessionFactory = Callable[..., SecureSession]
 ProviderFactory = Callable[[SecureSession], LabProvider]
 GeneratorFactory = Callable[[str, int], TrafficGenerator]
 EspSummarizer = Callable[[Path, EspTotals], EspSummary | None]
+CaptureDeriver = Callable[[Path, Path, DatasetWorkloadWindow, tuple[str, str]], PcapSummary]
+CaptureInspector = Callable[[Path, DatasetWorkloadWindow, tuple[str, str]], PcapSummary]
+AnalysisRunner = Callable[..., dict[str, object]]
 
 
 @dataclass
@@ -64,6 +73,7 @@ class _SessionRecord:
     log: TextIO
     next_workload_sequence: int = 1
     esp_totals: EspTotals = field(default_factory=EspTotals.empty)
+    analysis: Mapping[str, object] | None = None
 
 
 class _RecoveredTrafficFailure(Exception):
@@ -98,6 +108,24 @@ def _iso_from_ns(value: int) -> str:
     )
 
 
+def _spis(sas: Mapping[str, str]) -> dict[str, list[str]]:
+    return {
+        gateway: list(parse_sa(sas.get(gateway, "")).spis)
+        for gateway in ("gateway-a", "gateway-b")
+    }
+
+
+def _normalized_encryption(value: str) -> str:
+    upper = value.upper()
+    if "AES_GCM_16_256" in upper:
+        return "AES-256-GCM"
+    if "AES_GCM_16_128" in upper:
+        return "AES-128-GCM"
+    if "AES_CBC_256" in upper:
+        return "AES-256-CBC"
+    return "UNKNOWN"
+
+
 class LiveLabOrchestrator:
     def __init__(
         self,
@@ -112,6 +140,10 @@ class LiveLabOrchestrator:
         seed_factory: Callable[[], int] = lambda: randbits(63),
         time_ns: Callable[[], int] = __import__("time").time_ns,
         esp_summarizer: EspSummarizer = summarize_esp,
+        capture_deriver: CaptureDeriver = derive_workload_esp,
+        capture_inspector: CaptureInspector = inspect_ml_pcap,
+        analysis_runner: AnalysisRunner = analyze_for_frontend,
+        model_dir: Path = Path("model"),
     ) -> None:
         self.root_dir = Path(root_dir)
         self.root_dir.mkdir(parents=True, exist_ok=True, mode=0o750)
@@ -127,6 +159,10 @@ class LiveLabOrchestrator:
         self._seed_factory = seed_factory
         self._time_ns = time_ns
         self._esp_summarizer = esp_summarizer
+        self._capture_deriver = capture_deriver
+        self._capture_inspector = capture_inspector
+        self._analysis_runner = analysis_runner
+        self._model_dir = Path(model_dir)
         self._records: dict[str, _SessionRecord] = {}
         self._active_id: str | None = None
         self._mystery_index = 0
@@ -251,6 +287,21 @@ class LiveLabOrchestrator:
             {"workload_id": workload_id},
         )
 
+    def trigger_rekey(self, session_id: str) -> Future[object]:
+        return self.submit(session_id, LiveAction.REKEY, {})
+
+    def refresh(self, session_id: str) -> Future[object]:
+        return self.submit(session_id, LiveAction.REFRESH, {})
+
+    def analyze(self, session_id: str) -> Future[object]:
+        return self.submit(session_id, LiveAction.ANALYZE, {})
+
+    def reveal(self, session_id: str) -> Future[object]:
+        return self.submit(session_id, LiveAction.REVEAL, {})
+
+    def disconnect(self, session_id: str) -> Future[object]:
+        return self.submit(session_id, LiveAction.DISCONNECT, {})
+
     def submit(
         self,
         session_id: str,
@@ -270,16 +321,10 @@ class LiveLabOrchestrator:
                 session_id=session_id,
             ) from error
         validate_action(record.store.snapshot, normalized_action)
-        if normalized_action not in (LiveAction.CONNECT, LiveAction.TRAFFIC):
-            raise LiveProblem(
-                "ACTION_NOT_IMPLEMENTED",
-                "This Live Lab action is not available yet.",
-                session_id=session_id,
-            )
         accepted = replace(
             record.store.snapshot,
             active_action=normalized_action,
-            state_reason="CONNECT action accepted",
+            state_reason=f"{normalized_action.value} action accepted",
         )
         record.store.append(
             "action.accepted",
@@ -306,6 +351,16 @@ class LiveLabOrchestrator:
             elif action is LiveAction.TRAFFIC:
                 workload_id = str(payload.get("workload_id", ""))
                 self._run_traffic(record, workload_id)
+            elif action is LiveAction.REKEY:
+                self._rekey(record)
+            elif action is LiveAction.REFRESH:
+                self._refresh(record)
+            elif action is LiveAction.ANALYZE:
+                self._analyze(record)
+            elif action is LiveAction.REVEAL:
+                self._reveal(record)
+            elif action is LiveAction.DISCONNECT:
+                self._disconnect(record)
             else:
                 raise AssertionError(f"unhandled action: {action.value}")
         except _RecoveredTrafficFailure as recovered:
@@ -327,10 +382,29 @@ class LiveLabOrchestrator:
         except BaseException as error:
             self._fail_and_cleanup(record, action, error)
             raise
+        if (
+            action is LiveAction.DISCONNECT
+            and record.store.snapshot.cleanup_status is CleanupStatus.FAILED
+        ):
+            cleared = replace(
+                record.store.snapshot,
+                active_action=None,
+                state_reason="DISCONNECT action failed during cleanup",
+            )
+            record.store.append(
+                "action.failed",
+                cleared.state,
+                cleared.state_reason,
+                {"action": action.value, "error": cleared.failure},
+                (),
+                snapshot=cleared,
+                durable=True,
+            )
+            return
         completed = replace(
             record.store.snapshot,
             active_action=None,
-            state_reason="CONNECT action completed",
+            state_reason=f"{action.value} action completed",
         )
         record.store.append(
             "action.completed",
@@ -339,6 +413,398 @@ class LiveLabOrchestrator:
             {"action": action.value},
             (),
             snapshot=completed,
+            durable=True,
+        )
+
+    def _rekey(self, record: _SessionRecord) -> None:
+        before_sas = record.session.refresh_sas()
+        rekeying = transition(
+            record.store.snapshot,
+            SessionState.REKEYING,
+            "verified CHILD_SA rekey started",
+        )
+        record.store.append(
+            "rekey.started",
+            rekeying.state,
+            rekeying.state_reason,
+            {"before_spis": _spis(before_sas)},
+            ({"source": "swanctl", "record": "list-sas-before-rekey"},),
+            snapshot=rekeying,
+            durable=True,
+        )
+        pfs = record.session.rekey()
+        rekey_evidence = getattr(record.session, "rekey_evidence", None)
+        after_sas = (
+            dict(rekey_evidence.after_sas)
+            if rekey_evidence is not None
+            else record.session.refresh_sas()
+        )
+        record.session.collect_xfrm()
+        scenario = record.session.scenario
+        if scenario is None:
+            raise RuntimeError("scenario is unavailable after rekey")
+        verification_state = {
+            "VERIFIED": "enabled",
+            "VERIFIED_DISABLED": "disabled",
+        }.get(pfs.status, "unknown")
+        active = transition(
+            record.store.snapshot,
+            SessionState.TUNNEL_ACTIVE,
+            "CHILD_SA replacement and PFS semantics evaluated",
+        )
+        rekey_data: dict[str, object] = {
+            "before_spis": _spis(before_sas),
+            "after_spis": _spis(after_sas),
+            "observed": {
+                "status": pfs.status,
+                "rekey_observed": pfs.rekey_observed,
+                "evidence": list(pfs.evidence),
+            },
+            "verification_state": verification_state,
+        }
+        if record.mystery:
+            rekey_data["configuration_withheld"] = True
+        else:
+            rekey_data["configured"] = {
+                "pfs": scenario.ipsec.pfs,
+                "esp_proposal": scenario.ipsec.esp_proposal,
+            }
+        record.store.append(
+            "child_sa.rekeyed",
+            active.state,
+            active.state_reason,
+            rekey_data,
+            (
+                {"source": "swanctl", "record": "list-sas-after-rekey"},
+                {"source": "strongswan-log", "record": "child-rekey-proposal"},
+                {"source": "xfrm", "record": "state-and-policy-after-rekey"},
+            ),
+            snapshot=active,
+            durable=True,
+        )
+
+    def _refresh(self, record: _SessionRecord) -> None:
+        sas = record.session.refresh_sas()
+        xfrm = record.session.collect_xfrm()
+        if not sas or not xfrm:
+            raise RuntimeError("SA refresh returned incomplete evidence")
+        self._append(
+            record,
+            "sa.refreshed",
+            "swanctl and XFRM state were refreshed",
+            {"spis": _spis(sas), "gateways": sorted(xfrm)},
+            (
+                {"source": "swanctl", "record": "list-sas"},
+                {"source": "xfrm", "record": "state-and-policy"},
+            ),
+        )
+
+    def _analyze(self, record: _SessionRecord) -> None:
+        latest_sequence = record.store.snapshot.latest_completed_workload_sequence
+        workload = next(
+            (
+                item
+                for item in record.store.snapshot.completed_workloads
+                if item.sequence == latest_sequence
+            ),
+            None,
+        )
+        if workload is None:
+            raise RuntimeError("latest completed workload metadata is unavailable")
+        self._change_state(
+            record,
+            SessionState.ANALYZING,
+            "analysis.started",
+            "full-session capture sealing and analysis started",
+        )
+        record.session.stop_captures()
+        sealed = replace(
+            record.store.snapshot,
+            capture_status=CaptureStatus.SEALED,
+            state_reason="full-session evidence capture sealed",
+        )
+        record.store.append(
+            "capture.sealed",
+            sealed.state,
+            sealed.state_reason,
+            {"artifact": "full-evidence.pcap"},
+            ({"source": "capture", "record": "full-session-finalized"},),
+            snapshot=sealed,
+            durable=True,
+        )
+        capture_evidence = record.session.validate_captures()
+        window = DatasetWorkloadWindow(
+            workload.started_unix_ns,
+            workload.ended_unix_ns,
+        )
+        full_path = record.session.run_dir / "full-evidence.pcap"
+        workload_path = record.session.run_dir / "encrypted.pcap"
+        peers = ("192.0.2.1", "192.0.2.2")
+        self._capture_deriver(full_path, workload_path, window, peers)
+        ml_summary = self._capture_inspector(workload_path, window, peers)
+        self._write_analysis_evidence(record, capture_evidence, ml_summary)
+        envelope = self._analysis_runner(
+            full_path,
+            model_dir=self._model_dir,
+            evidence_dir=record.session.run_dir,
+            traffic_capture_path=workload_path,
+        )
+        analysis = envelope.get("analysis")
+        if not isinstance(analysis, Mapping) or analysis.get("summary", {}).get("status") != "COMPLETE":  # type: ignore[union-attr]
+            raise RuntimeError("session analyzer did not complete")
+        write_json_atomic(record.session.run_dir / "analysis.json", dict(envelope))
+        record.analysis = dict(envelope)
+        ready = transition(
+            record.store.snapshot,
+            SessionState.READY,
+            "session analysis completed from sealed evidence",
+        )
+        ready = replace(ready, analysis_available=True)
+        public_envelope = deepcopy(envelope)
+        if record.mystery:
+            public_analysis = public_envelope.get("analysis")
+            if isinstance(public_analysis, dict):
+                public_analysis["controlled_evidence"] = {
+                    "available": True,
+                    "source": "controlled-lab-artifacts",
+                    "withheld_until_reveal": True,
+                }
+        record.store.append(
+            "analysis.completed",
+            ready.state,
+            ready.state_reason,
+            public_envelope,
+            (
+                {"source": "capture", "record": "full-evidence.pcap"},
+                {"source": "capture", "record": "encrypted.pcap"},
+                {"source": "analyzer", "record": "analysis.json"},
+            ),
+            snapshot=ready,
+            durable=True,
+        )
+
+    def _write_analysis_evidence(
+        self,
+        record: _SessionRecord,
+        capture_evidence: object,
+        ml_summary: PcapSummary,
+    ) -> None:
+        scenario = record.session.scenario
+        if scenario is None:
+            raise RuntimeError("scenario is unavailable during analysis")
+        verification = evaluate_ipsec(
+            record.session.sas,
+            record.session.xfrm,
+            capture_evidence,
+            run_id=record.store.snapshot.session_id,
+            scenario=scenario,
+        )
+        if verification.status != "PASS":
+            failed = [check.name for check in verification.checks if not check.passed]
+            raise RuntimeError("sealed IPsec evidence failed: " + ", ".join(failed))
+        sa = parse_sa(record.session.sas["gateway-a"])
+        configured = {
+            "ike_version": scenario.ipsec.ike_version,
+            "mode": scenario.ipsec.mode,
+            "ike_proposal": scenario.ipsec.ike_proposal,
+            "esp_proposal": scenario.ipsec.esp_proposal,
+            "pfs": scenario.ipsec.pfs,
+            "ip_version": scenario.ipsec.ip_version,
+            "local_subnet": scenario.ipsec.local_subnet,
+            "remote_subnet": scenario.ipsec.remote_subnet,
+            "transit_subnet": scenario.ipsec.transit_subnet,
+        }
+        observed = {
+            "ike_version": 2,
+            "ike_proposal": sa.ike_proposal,
+            "esp_proposal": f"{sa.esp_proposal}/NO_EXT_SEQ",
+            "pfs": asdict(record.session.pfs),
+        }
+        write_json_atomic(
+            record.session.run_dir / "ground_truth.json",
+            {
+                "schema_version": "ipsec-sentinel.live-ground-truth/v1",
+                "run_id": record.store.snapshot.session_id,
+                "status": "PASS",
+                "capture": {
+                    "full_evidence_file": "full-evidence.pcap",
+                    "ml_input_file": "encrypted.pcap",
+                    "ml_esp_packets": ml_summary.packet_count,
+                    "ml_capture_bytes": ml_summary.capture_bytes,
+                    "ml_duration_seconds": ml_summary.duration_seconds,
+                },
+                "ipsec": {
+                    "scenario_id": scenario.id,
+                    "configured": configured,
+                    "observed": observed,
+                },
+            },
+        )
+        write_json_atomic(
+            record.session.run_dir / "verification.json",
+            verification.to_dict(),
+        )
+        write_text_atomic(record.session.run_dir / "scenario.yaml", record.session.scenario_yaml)
+        for gateway in ("gateway-a", "gateway-b"):
+            write_text_atomic(
+                record.session.run_dir / f"swanctl-{gateway}.txt",
+                record.session.sas[gateway],
+            )
+            write_text_atomic(
+                record.session.run_dir / f"xfrm-{gateway}.txt",
+                record.session.xfrm[gateway],
+            )
+
+    def _reveal(self, record: _SessionRecord) -> None:
+        if record.analysis is None:
+            raise RuntimeError("analysis is unavailable for Mystery reveal")
+        scenario = record.session.scenario
+        if scenario is None:
+            raise RuntimeError("scenario is unavailable for Mystery reveal")
+        analysis = record.analysis["analysis"]
+        assert isinstance(analysis, Mapping)
+        ike = analysis.get("ike", {})
+        pfs = analysis.get("pfs", {})
+        assert isinstance(ike, Mapping) and isinstance(pfs, Mapping)
+        encryption = ike.get("encryption", {})
+        assert isinstance(encryption, Mapping)
+        expected_encryption = _normalized_encryption(
+            negotiated_policy(scenario).esp_encryption
+        )
+        expected_pfs = "enabled" if scenario.ipsec.pfs else "disabled"
+        revealed = replace(
+            record.store.snapshot,
+            revealed=True,
+            state_reason="Mystery VPN ground truth revealed after analysis",
+        )
+        record.store.append(
+            "mystery.revealed",
+            revealed.state,
+            revealed.state_reason,
+            {
+                "ground_truth": {
+                    "scenario_id": scenario.id,
+                    "display_name": SCENARIO_NAMES[scenario.id],
+                    "encryption": expected_encryption,
+                    "pfs": expected_pfs,
+                    "provenance": "GROUND_TRUTH",
+                },
+                "sentinel": {
+                    "encryption": dict(encryption),
+                    "pfs": dict(pfs),
+                },
+                "comparison": {
+                    "encryption_match": encryption.get("normalized") == expected_encryption,
+                    "pfs_match": pfs.get("state") == expected_pfs,
+                },
+            },
+            ({"source": "scenario", "record": "controlled-ground-truth"},),
+            snapshot=revealed,
+            durable=True,
+        )
+
+    def _disconnect(self, record: _SessionRecord) -> None:
+        current = record.store.snapshot
+        if current.state is SessionState.COMPLETE:
+            record.provider.stop_scenario()
+            repeated = replace(
+                current,
+                cleanup_status=CleanupStatus.SUCCEEDED,
+                tunnel_status=TunnelStatus.DISCONNECTED,
+                state_reason="cleanup already completed",
+            )
+            record.store.append(
+                "cleanup.completed",
+                repeated.state,
+                repeated.state_reason,
+                {"idempotent": True},
+                (),
+                snapshot=repeated,
+                durable=True,
+            )
+            return
+        disconnecting = transition(current, SessionState.DISCONNECTING, "disconnect started")
+        record.store.append(
+            "disconnect.started",
+            disconnecting.state,
+            disconnecting.state_reason,
+            {},
+            (),
+            snapshot=disconnecting,
+            durable=True,
+        )
+        cleaning = transition(
+            record.store.snapshot,
+            SessionState.CLEANING_UP,
+            "owned Live Lab resource cleanup started",
+        )
+        cleaning = replace(cleaning, cleanup_status=CleanupStatus.RUNNING)
+        record.store.append(
+            "cleanup.started",
+            cleaning.state,
+            cleaning.state_reason,
+            {},
+            (),
+            snapshot=cleaning,
+            durable=True,
+        )
+        try:
+            record.provider.stop_scenario()
+        except BaseException as error:
+            failed = transition(
+                record.store.snapshot,
+                SessionState.FAILED,
+                "disconnect cleanup did not complete",
+            )
+            primary_failure = failed.failure or {
+                "code": "DISCONNECT_FAILED",
+                "message": "Live Lab disconnect cleanup failed; retry disconnect.",
+                "operation": "DISCONNECT",
+                "exception_type": type(error).__name__,
+            }
+            failed = replace(
+                failed,
+                cleanup_status=CleanupStatus.FAILED,
+                tunnel_status=TunnelStatus.FAILED,
+                capture_status=(
+                    CaptureStatus.FAILED
+                    if failed.capture_status is CaptureStatus.RUNNING
+                    else failed.capture_status
+                ),
+                failure=primary_failure,
+            )
+            record.store.append(
+                "cleanup.failed",
+                failed.state,
+                failed.state_reason,
+                {"exception_type": type(error).__name__},
+                (),
+                snapshot=failed,
+                durable=True,
+            )
+            return
+        complete = transition(
+            record.store.snapshot,
+            SessionState.COMPLETE,
+            "disconnect cleanup completed",
+        )
+        complete = replace(
+            complete,
+            cleanup_status=CleanupStatus.SUCCEEDED,
+            tunnel_status=TunnelStatus.DISCONNECTED,
+            capture_status=(
+                CaptureStatus.SEALED
+                if complete.capture_status is CaptureStatus.SEALED
+                else CaptureStatus.STOPPED
+            ),
+        )
+        record.store.append(
+            "cleanup.completed",
+            complete.state,
+            complete.state_reason,
+            {"idempotent": False},
+            (),
+            snapshot=complete,
             durable=True,
         )
 
