@@ -52,12 +52,14 @@ class LocalLabProvider:
     def __init__(self, session: SecureSession) -> None:
         self.session = session
         self._endpoint: ProviderEndpoint | None = None
+        self._owns_resources = False
 
     def start_scenario(self, scenario_id: str) -> ProviderEndpoint:
         if scenario_id not in VALIDATED_SCENARIOS:
             raise ValueError(f"scenario is not allowlisted: {scenario_id}")
         if self._endpoint is not None:
             raise RuntimeError("local scenario is already started")
+        self._owns_resources = True
         self.session.load_scenario(scenario_id)
         self.session.setup_topology()
         self.session.start_daemons()
@@ -83,12 +85,13 @@ class LocalLabProvider:
         return {"ready": self._endpoint is not None, "provider": "local"}
 
     def stop_scenario(self) -> None:
-        if self._endpoint is None:
+        if not self._owns_resources:
             return
         try:
             self.session.cleanup()
         finally:
             self._endpoint = None
+            self._owns_resources = False
 
 
 class GcpLabProvider:

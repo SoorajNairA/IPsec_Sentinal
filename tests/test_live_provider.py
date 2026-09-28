@@ -28,6 +28,12 @@ class FakeSession:
         self.calls.append("cleanup")
 
 
+class FailingSession(FakeSession):
+    def start_daemons(self) -> None:
+        self.calls.append("start_daemons")
+        raise RuntimeError("daemon startup failed")
+
+
 class LocalLabProviderTest(unittest.TestCase):
     def test_start_and_stop_delegate_to_secure_session(self) -> None:
         session = FakeSession()
@@ -90,6 +96,15 @@ class LocalLabProviderTest(unittest.TestCase):
         )
         self.assertNotIn("scenario_id", public)
         self.assertNotIn("private", public)
+
+    def test_partial_local_start_can_still_be_stopped_idempotently(self) -> None:
+        session = FailingSession()
+        provider = LocalLabProvider(session)  # type: ignore[arg-type]
+        with self.assertRaisesRegex(RuntimeError, "daemon startup"):
+            provider.start_scenario("secure-baseline")
+        provider.stop_scenario()
+        provider.stop_scenario()
+        self.assertEqual(session.calls.count("cleanup"), 1)
 
     def test_gcp_boundary_has_no_constructor_or_filesystem_side_effect(self) -> None:
         provider = GcpLabProvider()
