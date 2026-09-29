@@ -1,7 +1,7 @@
 # IPsec Sentinel GCP Live Lab Design Specification
 
 **Date:** 2026-09-29  
-**Status:** Proposed for review  
+**Status:** Approved  
 **Target branch:** `feat/ipsec-sentinel-gcp-live-lab`  
 **Stacked base:** `feat/ipsec-sentinel-live-lab` at `0083fc80d46947952c946dc143d527d46c5bd162`  
 **Google Cloud project:** `ipsec-sentinel` (`429285250074`)
@@ -75,7 +75,8 @@ owned by the invoking user/root and mode `0600`. It contains only:
 
 - exact project, project number, region, and zone;
 - exact scenario-to-instance allowlist;
-- deployment identifier and protected endpoint address;
+- deployment identifier, protected control address `10.20.0.1`, and protected
+  workload address `10.20.0.2`;
 - local paths to root-readable IKE and control credentials;
 - bounded startup, health, and stop timeouts.
 
@@ -166,8 +167,9 @@ The responder contains:
   `10.20.0.1/24`;
 - IPv4 forwarding enabled and reverse-path filtering disabled on the required
   interfaces;
-- an allowlisted remote workload service bound only to `10.20.0.2`;
-- an allowlisted evidence service reachable only through the protected subnet;
+- an authenticated control/evidence service bound only to the protected
+  gateway address `10.20.0.1`, with authority to manage allowlisted services
+  inside the server namespace;
 - systemd units with bounded restart behavior and journald logs;
 - a boot health script that verifies strongSwan, namespaces, routes, XFRM
   capability, forwarding, rp_filter, workload service, and scenario manifest
@@ -246,9 +248,11 @@ provenance.
 
 ## 9. Protected remote workload control
 
-The remote workload service is reachable only at `10.20.0.2` after IPsec is
-active. It accepts a fixed versioned JSON protocol over HTTPS, authenticates a
-high-entropy deployment token, validates a session nonce, and exposes only:
+The remote control service is reachable only at `10.20.0.1` after IPsec is
+active. Workload protocols themselves terminate at `10.20.0.2` inside the
+protected server namespace. The control service accepts a fixed versioned JSON
+protocol over HTTPS, authenticates a high-entropy deployment token, validates
+a session nonce, and exposes only:
 
 - health and version;
 - prepare an allowlisted workload from a validated seeded plan;
