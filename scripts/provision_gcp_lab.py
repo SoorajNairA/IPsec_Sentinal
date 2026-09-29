@@ -5,6 +5,9 @@ import json
 from pathlib import Path
 import shutil
 import tempfile
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from ipsec_sentinel.cloud.config import GcpLabConfig
 from ipsec_sentinel.cloud.gcloud import GcloudClient
