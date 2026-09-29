@@ -147,10 +147,17 @@ def _public_mystery_envelope(envelope: Mapping[str, object]) -> dict[str, object
     analysis = public.get("analysis")
     if not isinstance(analysis, dict):
         return public
+    controlled = analysis.get("controlled_evidence")
+    capture_provenance = (
+        controlled.get("capture_provenance")
+        if isinstance(controlled, Mapping)
+        else None
+    )
     analysis["controlled_evidence"] = {
         "available": True,
         "source": "controlled-lab-artifacts",
         "withheld_until_reveal": True,
+        "capture_provenance": capture_provenance,
     }
     evidence = analysis.get("evidence")
     if isinstance(evidence, list):
@@ -214,6 +221,8 @@ class LiveLabOrchestrator:
         analysis_runner: AnalysisRunner = _default_analysis_runner,
         model_dir: Path = Path("model"),
         lock_path: Path | None = None,
+        startup_recovery: Callable[[Path], None] | None = None,
+        workload_allowlist: frozenset[str] = SUPERVISED_CLASS_ALLOWLIST,
     ) -> None:
         self.root_dir = Path(root_dir)
         self.root_dir.mkdir(parents=True, exist_ok=True, mode=0o750)
@@ -225,6 +234,8 @@ class LiveLabOrchestrator:
             )
         self._runtime_lock = LiveLabLock.acquire(lock_path)
         try:
+            if startup_recovery is not None:
+                startup_recovery(self.root_dir)
             for ownership_path in sorted(
                 self.root_dir.glob("SNT-*/runtime-ownership.json")
             ):
@@ -258,6 +269,7 @@ class LiveLabOrchestrator:
         self._capture_inspector = capture_inspector
         self._analysis_runner = analysis_runner
         self._model_dir = Path(model_dir)
+        self.workload_allowlist = workload_allowlist
         self._records: dict[str, _SessionRecord] = {}
         self._active_id: str | None = None
         self._mystery_index = 0
@@ -413,7 +425,15 @@ class LiveLabOrchestrator:
         return self._record(session_id).store.wait(after_id, timeout)
 
     def run_traffic(self, session_id: str, workload_id: str) -> Future[object]:
-        if workload_id not in SUPERVISED_CLASS_ALLOWLIST:
+        record = self._record(session_id)
+        if record.session.cloud_mode and workload_id not in {"icmp", "video"}:
+            raise LiveProblem(
+                "WORKLOAD_NOT_AVAILABLE_IN_CLOUD",
+                "Cloud prototype mode currently supports ICMP and Video.",
+                http_status=400,
+                session_id=session_id,
+            )
+        if workload_id not in self.workload_allowlist:
             raise LiveProblem(
                 "WORKLOAD_NOT_ALLOWED",
                 "Select one of the controlled supervised workloads.",
@@ -709,10 +729,34 @@ class LiveLabOrchestrator:
         )
         full_path = record.session.run_dir / "full-evidence.pcap"
         workload_path = record.session.run_dir / "encrypted.pcap"
-        peers = ("192.0.2.1", "192.0.2.2")
-        self._capture_deriver(full_path, workload_path, window, peers)
+        peers = record.session.capture_peers
+        normalization_receipt: Mapping[str, object] | None = None
+        if record.session.cloud_mode:
+            from ipsec_sentinel.cloud.natt import normalize_natt_workload
+
+            receipt = normalize_natt_workload(
+                full_path,
+                workload_path,
+                peers,
+                workload.started_unix_ns,
+                workload.ended_unix_ns,
+                excluded_intervals=record.session.control_intervals,
+            )
+            normalization_receipt = receipt.to_dict()
+            write_json_atomic(
+                record.session.run_dir / "natt-normalization.json",
+                normalization_receipt,
+            )
+        else:
+            self._capture_deriver(full_path, workload_path, window, peers)
         ml_summary = self._capture_inspector(workload_path, window, peers)
-        self._write_analysis_evidence(record, workload, capture_evidence, ml_summary)
+        self._write_analysis_evidence(
+            record,
+            workload,
+            capture_evidence,
+            ml_summary,
+            normalization_receipt=normalization_receipt,
+        )
         envelope = self._analysis_runner(
             full_path,
             model_dir=self._model_dir,
@@ -755,6 +799,7 @@ class LiveLabOrchestrator:
         workload: WorkloadWindow,
         capture_evidence: object,
         ml_summary: PcapSummary,
+        normalization_receipt: Mapping[str, object] | None = None,
     ) -> None:
         scenario = record.session.scenario
         if scenario is None:
@@ -765,6 +810,7 @@ class LiveLabOrchestrator:
             capture_evidence,
             run_id=record.store.snapshot.session_id,
             scenario=scenario,
+            allow_natt=record.session.cloud_mode,
         )
         if verification.status != "PASS":
             failed = [check.name for check in verification.checks if not check.passed]
@@ -801,6 +847,12 @@ class LiveLabOrchestrator:
                     "ml_esp_packets": ml_summary.packet_count,
                     "ml_capture_bytes": ml_summary.capture_bytes,
                     "ml_duration_seconds": ml_summary.duration_seconds,
+                    "ml_provenance": (
+                        "NATIVE_ESP_WORKLOAD_WINDOW"
+                        if normalization_receipt is None
+                        else "NATT_NORMALIZED_WORKLOAD_WINDOW"
+                    ),
+                    "normalization": normalization_receipt,
                 },
                 "traffic": {
                     "class": workload.workload_id,
@@ -1007,6 +1059,11 @@ class LiveLabOrchestrator:
             seed,
             record.scenario_id,
             "clean",
+            remote_video_controller=(
+                getattr(record.session.pair, "endpoint_client", None)
+                if record.session.cloud_mode
+                else None
+            ),
         )
         self._change_state(
             record,
@@ -1030,8 +1087,11 @@ class LiveLabOrchestrator:
                 {"workload": workload_id, "sequence": sequence, "seed": seed},
             )
             result = generator.run(context)
-            validation = generator.validate(context, result)
             ended_ns = self._time_ns()
+            after_workload = getattr(generator, "after_workload", None)
+            if callable(after_workload):
+                after_workload(context)
+            validation = generator.validate(context, result)
             if not validation.passed:
                 raise RuntimeError(
                     "traffic validation failed: " + "; ".join(validation.errors)
@@ -1100,7 +1160,33 @@ class LiveLabOrchestrator:
         assert validation is not None and result is not None
         snapshot_path = traffic_dir / "capture-snapshot.pcap"
         record.session.capture_snapshot(snapshot_path)
-        summary = self._esp_summarizer(snapshot_path, record.esp_totals)
+        if record.session.cloud_mode:
+            from ipsec_sentinel.cloud.natt import normalize_natt_workload
+
+            live_path = traffic_dir / "live-encrypted.pcap"
+            receipt = normalize_natt_workload(
+                snapshot_path,
+                live_path,
+                record.session.capture_peers,
+                started_ns,
+                ended_ns,
+                excluded_intervals=record.session.control_intervals,
+            )
+            packet_count = record.esp_totals.packet_count + receipt.packet_count
+            byte_count = record.esp_totals.bytes + receipt.capture_bytes
+            summary = EspSummary(
+                record.session.capture_peers,
+                packet_count,
+                byte_count,
+                receipt.packet_count,
+                receipt.capture_bytes,
+                {"captured": receipt.packet_count},
+                {"captured": receipt.capture_bytes},
+                receipt.first_timestamp_ns,
+                receipt.last_timestamp_ns,
+            )
+        else:
+            summary = self._esp_summarizer(snapshot_path, record.esp_totals)
         if summary is not None:
             record.esp_totals = summary.totals
             self._append(
@@ -1485,13 +1571,19 @@ class LiveLabOrchestrator:
     def _record_live_resources(self, record: _SessionRecord) -> None:
         if not record.ownership_path.is_file():
             return
-        for namespace in NAMESPACES:
+        namespaces = (
+            ("ips-client", "ips-gwa")
+            if record.session.cloud_mode
+            else NAMESPACES
+        )
+        for namespace in namespaces:
             record_resource(record.ownership_path, namespace=namespace)
         runtime_root = (
             Path("/run/ipsec-sentinel") / record.store.snapshot.session_id
         ).resolve()
         runtime_paths: set[Path] = {runtime_root}
-        for gateway in ("gateway-a", "gateway-b"):
+        gateways = ("gateway-a",) if record.session.cloud_mode else ("gateway-a", "gateway-b")
+        for gateway in gateways:
             gateway_root = runtime_root / gateway
             runtime_paths.add(gateway_root)
             runtime_paths.update(

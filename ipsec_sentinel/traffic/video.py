@@ -150,9 +150,14 @@ class VideoGenerator:
 
     def prepare(self, context: TrafficContext) -> None:
         service_path, receipts, ready, _, _ = self._paths(context)
-        self.port_selection = choose_available_port(
-            context, self.seed, "video", "tcp"
-        )
+        if context.remote_video_controller is None:
+            self.port_selection = choose_available_port(
+                context, self.seed, "video", "tcp"
+            )
+        else:
+            self.port_selection = PortSelection(
+                self.plan.preferred_port, 0, "video", "tcp"
+            )
         write_json_atomic(
             service_path,
             {
@@ -169,8 +174,24 @@ class VideoGenerator:
                 ],
             },
         )
-        self.service = HttpServiceProcess(context, service_path, receipts, ready)
-        self.service.start()
+        if context.remote_video_controller is None:
+            self.service = HttpServiceProcess(context, service_path, receipts, ready)
+            self.service.start()
+        else:
+            context.remote_video_controller.prepare_video(
+                {
+                    "port": self.port_selection.port,
+                    "seed": self.seed,
+                    "resources": [
+                        {
+                            "path": segment.path,
+                            "size": segment.expected_bytes,
+                            "content_type": "video/mp2t",
+                        }
+                        for segment in self.plan.segments
+                    ],
+                }
+            )
 
     def run(self, context: TrafficContext) -> TrafficRunResult:
         if self.port_selection is None:
@@ -212,11 +233,12 @@ class VideoGenerator:
         payload = json.loads(results_path.read_text(encoding="utf-8"))
         self.client_records = list(payload["records"])
         self.realized_duration_seconds = float(payload["duration_seconds"])
-        self.server_receipts = [
-            json.loads(line)
-            for line in receipts.read_text(encoding="utf-8").splitlines()
-            if line.strip()
-        ]
+        if context.remote_video_controller is None:
+            self.server_receipts = [
+                json.loads(line)
+                for line in receipts.read_text(encoding="utf-8").splitlines()
+                if line.strip()
+            ]
         self._result = TrafficRunResult(
             {
                 "client_records": self.client_records,
@@ -226,6 +248,14 @@ class VideoGenerator:
             }
         )
         return self._result
+
+    def after_workload(self, context: TrafficContext) -> None:
+        if context.remote_video_controller is not None:
+            self.server_receipts = list(
+                context.remote_video_controller.video_receipts()
+            )
+            if self._result is not None:
+                self._result.metrics["server_receipts"] = self.server_receipts
 
     def validate(
         self, context: TrafficContext, result: TrafficRunResult
@@ -239,7 +269,8 @@ class VideoGenerator:
         )
 
     def cleanup(self, context: TrafficContext) -> None:
-        del context
+        if context.remote_video_controller is not None:
+            context.remote_video_controller.cleanup_video()
         if self.service is not None:
             self.service.stop()
             self.service = None

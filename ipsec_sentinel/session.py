@@ -4,7 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, replace
 from pathlib import Path
 from time import monotonic, sleep, time
-from typing import TextIO
+from typing import Any, TextIO
 import os
 import shutil
 
@@ -58,48 +58,70 @@ class SecureSession:
         primary_capture_name: str,
         keep_lab: bool = False,
         process_observer: Callable[[str, int], None] | None = None,
+        topology: Any | None = None,
+        ipsec: Any | None = None,
+        cloud_mode: bool = False,
     ) -> None:
         if primary_capture_name not in ("encrypted.pcap", "full-evidence.pcap"):
             raise ValueError("unsupported primary capture name")
         self.run_dir = run_dir
         self.log = log
         self.keep_lab = keep_lab
-        self.topology = Topology(log)
-        self.pair = StrongSwanPair(log, process_observer=process_observer)
+        self.topology = topology if topology is not None else Topology(log)
+        self.pair = (
+            ipsec
+            if ipsec is not None
+            else StrongSwanPair(log, process_observer=process_observer)
+        )
+        self.cloud_mode = cloud_mode
         self.primary_destination = run_dir / primary_capture_name
         self.runtime_dir = Path("/run/ipsec-sentinel") / run_dir.name / "capture"
-        self.temporary_pcaps = {
-            "primary": self.runtime_dir / primary_capture_name,
-            "gateway-a": self.runtime_dir / "cleartext-audit-gateway-a.pcap",
-            "gateway-b": self.runtime_dir / "cleartext-audit-gateway-b.pcap",
-        }
-        self.destinations = {
-            "primary": self.primary_destination,
-            "gateway-a": run_dir / "cleartext-audit-gateway-a.pcap",
-            "gateway-b": run_dir / "cleartext-audit-gateway-b.pcap",
-        }
-        self.captures = {
-            "primary": CaptureSession(
-                self.temporary_pcaps["primary"], run_dir / "tcpdump.log",
-                process_observer=process_observer,
-                process_role="tcpdump-primary",
-            ),
-            "gateway-a": CaptureSession(
-                self.temporary_pcaps["gateway-a"],
-                run_dir / "tcpdump-audit-gateway-a.log",
-                capture_filter=AUDIT_FILTER,
-                process_observer=process_observer,
-                process_role="tcpdump-gateway-a",
-            ),
-            "gateway-b": CaptureSession(
-                self.temporary_pcaps["gateway-b"],
-                run_dir / "tcpdump-audit-gateway-b.log",
-                namespace="ips-gwb",
-                capture_filter=AUDIT_FILTER,
-                process_observer=process_observer,
-                process_role="tcpdump-gateway-b",
-            ),
-        }
+        if cloud_mode:
+            self.temporary_pcaps = {"primary": self.runtime_dir / primary_capture_name}
+            self.destinations = {"primary": self.primary_destination}
+            self.captures = {
+                "primary": CaptureSession(
+                    self.temporary_pcaps["primary"], run_dir / "tcpdump.log",
+                    namespace=getattr(self.topology, "capture_namespace", "ips-gwa"),
+                    interface=getattr(self.topology, "capture_interface", "wan0"),
+                    capture_filter="udp port 500 or udp port 4500",
+                    process_observer=process_observer,
+                    process_role="tcpdump-primary",
+                )
+            }
+        else:
+            self.temporary_pcaps = {
+                "primary": self.runtime_dir / primary_capture_name,
+                "gateway-a": self.runtime_dir / "cleartext-audit-gateway-a.pcap",
+                "gateway-b": self.runtime_dir / "cleartext-audit-gateway-b.pcap",
+            }
+            self.destinations = {
+                "primary": self.primary_destination,
+                "gateway-a": run_dir / "cleartext-audit-gateway-a.pcap",
+                "gateway-b": run_dir / "cleartext-audit-gateway-b.pcap",
+            }
+            self.captures = {
+                "primary": CaptureSession(
+                    self.temporary_pcaps["primary"], run_dir / "tcpdump.log",
+                    process_observer=process_observer,
+                    process_role="tcpdump-primary",
+                ),
+                "gateway-a": CaptureSession(
+                    self.temporary_pcaps["gateway-a"],
+                    run_dir / "tcpdump-audit-gateway-a.log",
+                    capture_filter=AUDIT_FILTER,
+                    process_observer=process_observer,
+                    process_role="tcpdump-gateway-a",
+                ),
+                "gateway-b": CaptureSession(
+                    self.temporary_pcaps["gateway-b"],
+                    run_dir / "tcpdump-audit-gateway-b.log",
+                    namespace="ips-gwb",
+                    capture_filter=AUDIT_FILTER,
+                    process_observer=process_observer,
+                    process_role="tcpdump-gateway-b",
+                ),
+            }
         self.scenario: Scenario | None = None
         self.scenario_yaml = ""
         self.topology_checks = ()
@@ -187,6 +209,10 @@ class SecureSession:
         return primary.snapshot(destination)
 
     def collect_xfrm(self) -> dict[str, str]:
+        collector = getattr(self.pair, "collect_xfrm", None)
+        if callable(collector):
+            self.xfrm = collector()
+            return self.xfrm
         for gateway, namespace in (
             ("gateway-a", "ips-gwa"),
             ("gateway-b", "ips-gwb"),
@@ -237,6 +263,14 @@ class SecureSession:
         self._captures_finalized = True
 
     def validate_captures(self) -> CaptureEvidence:
+        if self.cloud_mode:
+            from ipsec_sentinel.cloud.natt import validate_cloud_full_capture
+
+            self.capture_evidence = validate_cloud_full_capture(
+                self.primary_destination,
+                self.capture_peers,
+            )
+            return self.capture_evidence
         primary = validate_pcap(
             self.primary_destination,
             ("192.0.2.1", "192.0.2.2"),
@@ -251,6 +285,19 @@ class SecureSession:
         )
         self.capture_evidence = replace(primary, cleartext_packets=cleartext)
         return self.capture_evidence
+
+    @property
+    def capture_peers(self) -> tuple[str, str]:
+        if self.cloud_mode:
+            return tuple(self.topology.capture_peers)
+        return ("192.0.2.1", "192.0.2.2")
+
+    @property
+    def control_intervals(self) -> tuple[tuple[int, int], ...]:
+        endpoint = getattr(self.pair, "endpoint_client", None)
+        if endpoint is None:
+            return ()
+        return tuple(endpoint.control_intervals)
 
     def evidence(self) -> SecureSessionEvidence:
         if (

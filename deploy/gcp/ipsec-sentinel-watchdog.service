@@ -1,0 +1,6 @@
+[Unit]
+Description=Stop an unattended IPsec Sentinel lab VM
+
+[Service]
+Type=oneshot
+ExecStart=/usr/sbin/shutdown -h now

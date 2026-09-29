@@ -31,6 +31,8 @@ class FrontendServerConfig:
     max_xray_points: int = 1_500
     enable_live_lab: bool = False
     live_runs_dir: Path = Path("runs/live")
+    lab_provider: str = "local"
+    gcp_config: Path | None = None
     sse_heartbeat_seconds: float = 15.0
 
     def __post_init__(self) -> None:
@@ -42,6 +44,10 @@ class FrontendServerConfig:
             raise ValueError("max_upload_bytes must be positive")
         if self.sse_heartbeat_seconds <= 0:
             raise ValueError("sse_heartbeat_seconds must be positive")
+        if self.lab_provider not in {"local", "gcp"}:
+            raise ValueError("lab_provider must be local or gcp")
+        if self.lab_provider == "gcp" and self.gcp_config is None:
+            raise ValueError("gcp_config is required for the GCP provider")
 
 
 def _empty_xray(
@@ -449,11 +455,29 @@ def create_server(
 def serve(config: FrontendServerConfig) -> None:
     if config.enable_live_lab:
         from ipsec_sentinel.live.orchestrator import LiveLabOrchestrator
+        if config.lab_provider == "gcp":
+            from ipsec_sentinel.cloud import (
+                GcpLabConfig,
+                provider_factory,
+                recover_owned_instances,
+                session_factory,
+            )
 
-        orchestrator = LiveLabOrchestrator(
-            config.live_runs_dir,
-            model_dir=config.model_dir,
-        )
+            assert config.gcp_config is not None
+            cloud_config = GcpLabConfig.load(config.gcp_config)
+            orchestrator = LiveLabOrchestrator(
+                config.live_runs_dir,
+                model_dir=config.model_dir,
+                session_factory=session_factory(cloud_config),
+                provider_factory=provider_factory(cloud_config),
+                startup_recovery=lambda root: recover_owned_instances(root, cloud_config),
+                workload_allowlist=frozenset({"icmp", "video"}),
+            )
+        else:
+            orchestrator = LiveLabOrchestrator(
+                config.live_runs_dir,
+                model_dir=config.model_dir,
+            )
     else:
         orchestrator = None
     try:
@@ -468,4 +492,3 @@ def serve(config: FrontendServerConfig) -> None:
         server.server_close()
         if orchestrator is not None:
             orchestrator.close()
-

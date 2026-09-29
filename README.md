@@ -286,7 +286,23 @@ sudo ~/.venvs/ipsec-sentinel-ml/bin/python -m ipsec_sentinel.frontend \
 
 Open `http://127.0.0.1:8787`, select **Start Live Lab**, create a scenario, and connect. REST accepts explicit user actions; SSE replays the durable `events.jsonl` ledger using event IDs. Reloading the browser reconstructs the active session instead of starting a synthetic timeline. `full-evidence.pcap` retains the entire session, while `encrypted.pcap` is derived from the latest completed workload window for X-Ray and ML inference only.
 
-Use **Disconnect** before stopping the agent. `Ctrl+C` also closes the orchestrator and invokes idempotent cleanup. Session artifacts and curated logs remain; namespaces, veths, strongSwan/tcpdump processes, routes, locks, and temporary runtime state are removed. The current provider is local only—no GCP resources or credentials are used at this stage.
+Use **Disconnect** before stopping the agent. `Ctrl+C` also closes the orchestrator and invokes idempotent cleanup. Session artifacts and curated logs remain; namespaces, veths, strongSwan/tcpdump processes, routes, locks, and temporary runtime state are removed.
+
+The default provider remains local. The prototype GCP provider is selected only
+with `--lab-provider gcp --gcp-config /secure/path/gcp-lab.json`. Its config and
+PSK/control/TLS files must remain outside the repository with mode `0600`.
+Cloud mode exposes only ICMP and Video, connects to the four fixed responders
+over NAT-T, and never accepts a project, instance, endpoint, or credential from
+the browser. Render the complete non-mutating resource command preview with:
+
+```bash
+~/.venvs/ipsec-sentinel-ml/bin/python scripts/render_gcp_lab_commands.py \
+  --source-cidr <OPERATOR_PUBLIC_IPV4>/32
+```
+
+Do not run `scripts/provision_gcp_lab.py` until the exact preview digest has
+been reviewed and approved. Normal Live Lab cleanup stops only the VM recorded
+as owned by that session; infrastructure deletion is never automatic.
 
 The privileged browser proof is opt-in. Keep the agent above running, then execute from Windows PowerShell:
 

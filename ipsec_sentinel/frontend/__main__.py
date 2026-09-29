@@ -15,6 +15,8 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-upload-bytes", type=int, default=268_435_456)
     parser.add_argument("--enable-live-lab", action="store_true")
     parser.add_argument("--live-runs-dir", type=Path, default=Path("runs/live"))
+    parser.add_argument("--lab-provider", choices=("local", "gcp"), default="local")
+    parser.add_argument("--gcp-config", type=Path)
     return parser
 
 
@@ -27,6 +29,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         max_upload_bytes=args.max_upload_bytes,
         enable_live_lab=args.enable_live_lab,
         live_runs_dir=args.live_runs_dir,
+        lab_provider=args.lab_provider,
+        gcp_config=args.gcp_config,
     ))
     return 0
 

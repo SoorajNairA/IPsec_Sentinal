@@ -1,0 +1,10 @@
+[Unit]
+Description=Bound maximum IPsec Sentinel lab VM runtime
+
+[Timer]
+OnBootSec=15min
+AccuracySec=10s
+Unit=ipsec-sentinel-watchdog.service
+
+[Install]
+WantedBy=timers.target

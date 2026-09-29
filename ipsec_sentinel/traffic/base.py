@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable, Protocol, TextIO, runtime_checkable
+from typing import Any, Callable, Protocol, TextIO, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -16,6 +16,7 @@ class TrafficContext:
     server_namespace: str = "ips-server"
     client_ip: str = "10.10.0.2"
     server_ip: str = "10.20.0.2"
+    remote_video_controller: Any | None = None
 
 
 @dataclass(frozen=True)

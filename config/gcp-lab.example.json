@@ -1,0 +1,20 @@
+{
+  "project_id": "ipsec-sentinel",
+  "project_number": "429285250074",
+  "region": "asia-south1",
+  "zone": "asia-south1-a",
+  "operator": "black",
+  "operator_uid": 1000,
+  "operator_home": "/home/black",
+  "cloudsdk_config": "/home/black/.config/gcloud",
+  "source_cidr": "203.0.113.10/32",
+  "psk_file": "/etc/ipsec-sentinel/gcp/psk",
+  "control_token_file": "/etc/ipsec-sentinel/gcp/control-token",
+  "tls_ca_file": "/etc/ipsec-sentinel/gcp/ca.pem",
+  "tls_cert_file": "/etc/ipsec-sentinel/gcp/endpoint.crt",
+  "tls_key_file": "/etc/ipsec-sentinel/gcp/endpoint.key",
+  "startup_timeout_seconds": 180,
+  "health_timeout_seconds": 60,
+  "stop_timeout_seconds": 120,
+  "maximum_runtime_seconds": 900
+}

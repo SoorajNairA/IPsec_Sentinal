@@ -75,6 +75,8 @@ def load_controlled_evidence(directory: Path, capture_name: str) -> tuple[dict[s
         "configured": {**configured, "normalized_esp": _normalize_proposal(configured_proposal)},
         "observed": {**observed, "normalized_esp": _normalize_proposal(observed_proposal)},
         "verification_status": verification.get("status"),
+        "capture_provenance": capture.get("ml_provenance", "NATIVE_ESP_WORKLOAD_WINDOW"),
+        "normalization": capture.get("normalization"),
     }
     pfs = {
         "state": pfs_state, "provenance": pfs_provenance,

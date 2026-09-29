@@ -258,11 +258,15 @@ def _sa_xfrm_checks(
     return checks
 
 
-def _capture_checks(capture: CaptureEvidence) -> list[Check]:
+def _capture_checks(capture: CaptureEvidence, *, allow_natt: bool = False) -> list[Check]:
     return [
         _check("capture.ike", capture.ike_packets > 0, str(capture.ike_packets)),
         _check("capture.esp", capture.esp_packets > 0, str(capture.esp_packets)),
-        _check("capture.natt_absent", capture.natt_packets == 0, str(capture.natt_packets)),
+        _check(
+            "capture.natt_present" if allow_natt else "capture.natt_absent",
+            capture.natt_packets > 0 if allow_natt else capture.natt_packets == 0,
+            str(capture.natt_packets),
+        ),
         _check(
             "capture.cleartext_absent",
             capture.cleartext_packets == 0,
@@ -298,11 +302,12 @@ def evaluate_ipsec(
     run_id: str = "",
     pfs: PfsObservation | None = None,
     scenario: Scenario | None = None,
+    allow_natt: bool = False,
 ) -> Verification:
     checks = list(
         evaluate_tunnel(sas, xfrm, run_id=run_id, scenario=scenario).checks
     )
-    checks.extend(_capture_checks(capture))
+    checks.extend(_capture_checks(capture, allow_natt=allow_natt))
     if pfs is not None:
         checks.append(
             _check(

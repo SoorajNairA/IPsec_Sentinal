@@ -181,6 +181,11 @@ def analyze_capture(
                 traffic["capture_path"] = str(workload_path)
     sidecar_dir = path.parent if evidence_dir is None else Path(evidence_dir)
     controlled, controlled_pfs, controlled_items = load_controlled_evidence(sidecar_dir, path.name)
+    if (
+        traffic_capture_path is not None
+        and controlled.get("capture_provenance") == "NATT_NORMALIZED_WORKLOAD_WINDOW"
+    ):
+        traffic["capture_source"] = "NATT_NORMALIZED_WORKLOAD_WINDOW"
     evidence: list[Evidence] = [*protocol_evidence, *ike_evidence, *sa_evidence, *esp_evidence, *controlled_items]
     evidence_ids = {item.id for item in evidence}
     for field, identifier in (

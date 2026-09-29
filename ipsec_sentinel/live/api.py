@@ -41,7 +41,7 @@ class LiveLabApi:
             HTTPStatus.OK,
             {
                 "scenarios": scenarios,
-                "workloads": sorted(SUPERVISED_CLASS_ALLOWLIST),
+                "workloads": sorted(self.orchestrator.workload_allowlist),
             },
         )
 
