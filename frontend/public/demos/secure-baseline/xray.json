@@ -1,0 +1,84 @@
+{
+  "displayed_packet_count": 14,
+  "duration_seconds": 0.621116,
+  "packets": [
+    {
+      "direction": "forward",
+      "length": 610,
+      "relative_time_seconds": 0.0
+    },
+    {
+      "direction": "reverse",
+      "length": 610,
+      "relative_time_seconds": 0.000315
+    },
+    {
+      "direction": "forward",
+      "length": 610,
+      "relative_time_seconds": 0.100534
+    },
+    {
+      "direction": "reverse",
+      "length": 610,
+      "relative_time_seconds": 0.100787
+    },
+    {
+      "direction": "forward",
+      "length": 610,
+      "relative_time_seconds": 0.204715
+    },
+    {
+      "direction": "reverse",
+      "length": 610,
+      "relative_time_seconds": 0.204962
+    },
+    {
+      "direction": "forward",
+      "length": 610,
+      "relative_time_seconds": 0.308601
+    },
+    {
+      "direction": "reverse",
+      "length": 610,
+      "relative_time_seconds": 0.308847
+    },
+    {
+      "direction": "forward",
+      "length": 610,
+      "relative_time_seconds": 0.412807
+    },
+    {
+      "direction": "reverse",
+      "length": 610,
+      "relative_time_seconds": 0.41326
+    },
+    {
+      "direction": "forward",
+      "length": 610,
+      "relative_time_seconds": 0.516806
+    },
+    {
+      "direction": "reverse",
+      "length": 610,
+      "relative_time_seconds": 0.517052
+    },
+    {
+      "direction": "forward",
+      "length": 610,
+      "relative_time_seconds": 0.620862
+    },
+    {
+      "direction": "reverse",
+      "length": 610,
+      "relative_time_seconds": 0.621116
+    }
+  ],
+  "peer_pair": [
+    "192.0.2.1",
+    "192.0.2.2"
+  ],
+  "sampled": false,
+  "schema_id": "ipsec-sentinel.xray/v1",
+  "total_packet_count": 14,
+  "version": "1.0"
+}

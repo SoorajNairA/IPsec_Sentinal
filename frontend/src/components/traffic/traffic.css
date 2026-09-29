@@ -1,0 +1,57 @@
+.traffic-view-layout { display: grid; grid-template-columns: minmax(0, 1.65fr) minmax(300px, 0.7fr); gap: 1rem; align-items: start; }
+.xray-ribbon, .traffic-intelligence { border: 1px solid var(--line-strong); border-radius: var(--radius-lg); background: rgba(14, 19, 24, 0.94); overflow: hidden; }
+.xray-header, .traffic-intelligence > header { min-height: 76px; padding: 1rem 1.15rem; display: flex; align-items: center; justify-content: space-between; gap: 1rem; border-bottom: 1px solid var(--line-subtle); }
+.xray-header h2, .traffic-intelligence h2 { margin: 0.25rem 0 0; font-size: 1rem; font-weight: 570; letter-spacing: -0.02em; }
+.section-kicker { color: var(--text-tertiary); font: 0.57rem var(--font-mono); letter-spacing: 0.11em; text-transform: uppercase; }
+.visibility-zero { display: grid; gap: 0.2rem; text-align: right; }
+.visibility-zero strong { color: var(--protocol); font: 500 0.63rem var(--font-mono); }
+.visibility-zero span { color: var(--text-tertiary); font-size: 0.61rem; }
+.xray-canvas { padding: 0.75rem 1.15rem 0.9rem; }
+.xray-canvas svg { width: 100%; height: clamp(230px, 31vw, 340px); display: block; overflow: visible; }
+.xray-canvas svg text { fill: var(--text-tertiary); font: 22px var(--font-mono); letter-spacing: 0.08em; }
+.xray-axis { stroke: rgba(220, 229, 232, 0.16); stroke-width: 1; stroke-dasharray: 4 8; }
+.packet-mark { stroke-width: 3; stroke-linecap: round; }
+.packet-mark.is-forward { stroke: var(--protocol-strong); }
+.packet-mark.is-reverse { stroke: var(--verified); }
+.density-track { height: 28px; display: grid; grid-template-columns: repeat(40, 1fr); align-items: end; gap: 2px; border-bottom: 1px solid var(--line-subtle); }
+.density-track i { min-height: 2px; background: linear-gradient(to top, rgba(133,215,238,0.22), var(--protocol)); }
+.xray-time { display: flex; justify-content: space-between; margin-top: 0.45rem; color: var(--text-tertiary); font: 0.57rem var(--font-mono); }
+.aggregate-fallback { min-height: 300px; padding: 4rem 2rem; display: grid; place-content: center; text-align: center; }
+.aggregate-fallback strong { color: var(--text-secondary); }
+.aggregate-fallback p { max-width: 420px; color: var(--text-tertiary); font-size: 0.76rem; line-height: 1.6; }
+.xray-metrics { display: grid; grid-template-columns: 1.3fr repeat(3, 0.7fr); border-top: 1px solid var(--line-subtle); }
+.xray-metrics > div { min-height: 82px; padding: 0.9rem 1.15rem; display: grid; align-content: center; gap: 0.24rem; }
+.xray-metrics > div + div { border-left: 1px solid var(--line-subtle); }
+.xray-metrics span, .model-metadata dt { color: var(--text-tertiary); font: 0.56rem var(--font-mono); letter-spacing: 0.07em; text-transform: uppercase; }
+.xray-metrics strong { color: var(--text-primary); font-size: 0.73rem; font-weight: 530; }
+.xray-metrics small { color: var(--text-tertiary); font-size: 0.56rem; }
+.prediction-lead { padding: 1.5rem 1.15rem 1.25rem; border-bottom: 1px solid var(--line-subtle); }
+.prediction-lead > span { color: var(--protocol); font: 0.59rem var(--font-mono); letter-spacing: 0.08em; text-transform: uppercase; }
+.prediction-lead strong { margin-top: 0.55rem; display: block; font-size: 2rem; line-height: 1; font-weight: 520; text-transform: capitalize; letter-spacing: -0.05em; }
+.prediction-lead p { margin: 0.7rem 0 0; color: var(--text-secondary); font-size: 0.71rem; }
+.prediction-lead small { margin-top: 0.65rem; display: block; color: var(--text-tertiary); line-height: 1.5; }
+.traffic-intelligence.is-uncertain .prediction-lead > span, .traffic-intelligence.is-uncertain .prediction-lead strong { color: var(--caution); }
+.probability-list { padding: 0.9rem 1.15rem; display: grid; gap: 0.72rem; }
+.probability-list > div { display: grid; gap: 0.35rem; }
+.probability-list span { display: flex; justify-content: space-between; color: var(--text-secondary); font: 0.61rem var(--font-mono); text-transform: capitalize; }
+.probability-list i { height: 2px; background: var(--ink-800); }
+.probability-list b { display: block; height: 100%; background: var(--protocol); }
+.model-metadata { margin: 0; padding: 0 1.15rem; border-top: 1px solid var(--line-subtle); }
+.model-metadata div { padding: 0.7rem 0; display: grid; gap: 0.25rem; }
+.model-metadata div + div { border-top: 1px solid var(--line-subtle); }
+.model-metadata dd { margin: 0; color: var(--text-secondary); font: 0.59rem/1.4 var(--font-mono); overflow-wrap: anywhere; }
+.payload-contract { margin: 0.75rem; padding: 0.85rem; display: grid; gap: 0.28rem; border: 1px solid rgba(133,215,238,0.18); background: rgba(133,215,238,0.045); }
+.payload-contract strong { color: var(--protocol); font: 500 0.6rem var(--font-mono); }
+.payload-contract span { color: var(--text-tertiary); font-size: 0.59rem; line-height: 1.45; }
+
+@media (max-width: 980px) {
+  .traffic-view-layout { grid-template-columns: 1fr; }
+  .xray-metrics { grid-template-columns: repeat(2, 1fr); }
+  .xray-metrics > div:nth-child(3) { border-left: 0; border-top: 1px solid var(--line-subtle); }
+  .xray-metrics > div:nth-child(4) { border-top: 1px solid var(--line-subtle); }
+}
+
+@media (max-width: 620px) {
+  .xray-header { align-items: flex-start; flex-direction: column; }
+  .visibility-zero { text-align: left; }
+}

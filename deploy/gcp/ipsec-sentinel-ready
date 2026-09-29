@@ -1,0 +1,9 @@
+#!/bin/sh
+set -eu
+
+systemctl is-active --quiet strongswan
+systemctl is-active --quiet ipsec-sentinel-endpoint
+ip netns exec ips-server ip route show 10.10.0.0/24 | grep -q 'via 10.20.0.1'
+test "$(sysctl -n net.ipv4.ip_forward)" = 1
+test "$(sysctl -n net.ipv4.conf.all.rp_filter)" = 0
+printf 'IPSEC_SENTINEL_READY %s\n' "$(date +%s)" > /dev/ttyS0

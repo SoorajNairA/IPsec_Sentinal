@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "ipsec-sentinel.analysis/v1",
+  "title": "IPsec Sentinel Analysis v1",
+  "type": "object",
+  "required": [
+    "analysis_version", "schema_id", "capture", "summary", "peers",
+    "protocols", "ike", "controlled_evidence", "security_associations", "esp",
+    "traffic_intelligence", "evidence", "findings", "security_score",
+    "limitations"
+  ],
+  "properties": {
+    "analysis_version": {"const": "1.0"},
+    "schema_id": {"const": "ipsec-sentinel.analysis/v1"},
+    "capture": {"type": "object"},
+    "summary": {"type": "object"},
+    "peers": {"type": "object"},
+    "protocols": {"type": "object"},
+    "ike": {"type": "object"},
+    "controlled_evidence": {"type": "object"},
+    "security_associations": {"type": "array"},
+    "esp": {"type": "object"},
+    "traffic_intelligence": {"type": "object"},
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "provenance", "description", "packet_numbers", "timestamps_ns", "source_component"],
+        "properties": {
+          "provenance": {"enum": ["OBSERVED", "DERIVED", "AI_INFERRED", "UNKNOWN"]}
+        }
+      }
+    },
+    "findings": {"type": "array"},
+    "security_score": {"type": "object"},
+    "limitations": {"type": "array"}
+  }
+}

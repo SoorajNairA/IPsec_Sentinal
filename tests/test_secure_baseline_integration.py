@@ -1,0 +1,55 @@
+from pathlib import Path
+from tempfile import TemporaryDirectory
+import json
+import os
+import subprocess
+import unittest
+
+from ipsec_sentinel.artifacts import REQUIRED_SUCCESS_FILES
+from ipsec_sentinel.runner import run_secure_baseline
+
+
+@unittest.skipUnless(
+    os.environ.get("IPSEC_SENTINEL_INTEGRATION") == "1",
+    "set IPSEC_SENTINEL_INTEGRATION=1 and run as root",
+)
+class SecureBaselineIntegrationTest(unittest.TestCase):
+    def test_real_tunnel_produces_passing_artifacts_and_cleans_up(self) -> None:
+        with TemporaryDirectory(prefix="ipsec-sentinel-integration-", dir="/tmp") as directory:
+            runs_root = Path(directory)
+            exit_code = run_secure_baseline("secure-baseline", runs_root=runs_root)
+
+            self.assertEqual(exit_code, 0)
+            run_dirs = list(runs_root.iterdir())
+            self.assertEqual(len(run_dirs), 1)
+            run_dir = run_dirs[0]
+            self.assertTrue(
+                REQUIRED_SUCCESS_FILES.issubset({path.name for path in run_dir.iterdir()})
+            )
+            self.assertTrue((run_dir / "strongswan-gateway-a.log").is_file())
+            self.assertTrue((run_dir / "strongswan-gateway-b.log").is_file())
+            self.assertTrue((run_dir / "cleartext-audit-gateway-a.pcap").is_file())
+            self.assertTrue((run_dir / "cleartext-audit-gateway-b.pcap").is_file())
+            self.assertEqual(
+                json.loads((run_dir / "verification.json").read_text())["status"],
+                "PASS",
+            )
+            truth = json.loads((run_dir / "ground_truth.json").read_text())
+            self.assertEqual(truth["status"], "PASS")
+            self.assertEqual(truth["observed"]["pfs"]["status"], "VERIFIED")
+            self.assertTrue(truth["observed"]["pfs"]["rekey_observed"])
+            self.assertGreaterEqual(truth["capture"]["esp_packets"], 10)
+            self.assertGreaterEqual(truth["capture"]["ike_packets"], 6)
+            namespaces = subprocess.run(
+                ["ip", "netns", "list"],
+                check=True,
+                capture_output=True,
+                text=True,
+                timeout=5,
+            ).stdout
+            self.assertNotIn("ips-gwa", namespaces)
+            self.assertFalse((Path("/run/ipsec-sentinel") / run_dir.name).exists())
+
+
+if __name__ == "__main__":
+    unittest.main()

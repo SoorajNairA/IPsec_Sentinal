@@ -1,0 +1,18 @@
+dataset:
+  name: cipherlens-smoke-v1
+  schema_version: ipsec-sentinel.dataset-ground-truth/v1
+  seed: 20260924
+traffic:
+  classes:
+    - icmp
+    - web
+    - video
+ipsec:
+  scenarios:
+    - secure-baseline
+network_profiles:
+  - clean
+runs_per_combination: 3
+execution:
+  workers: 1
+  retry_failed: 1

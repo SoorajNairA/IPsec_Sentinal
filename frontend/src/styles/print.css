@@ -1,0 +1,13 @@
+@media print {
+  @page { margin: 14mm; }
+  html, body { background: white !important; color: #172027 !important; }
+  .workspace-topbar, .analysis-nav, .view-heading.screen-only, .screen-only, .evidence-overlay, .evidence-drawer { display: none !important; }
+  .workspace-main { width: 100%; padding: 0; }
+  .analysis-report { width: 100%; border: 0; border-radius: 0; background: white; color: #172027; }
+  .analysis-report > section, .report-masthead { break-inside: avoid; border-color: #cdd4d8; }
+  .analysis-report p, .analysis-report ol, .analysis-report ul, .report-score span, .report-grid dt, .analysis-report > section > small { color: #43515a; }
+  .analysis-report .report-lead, .report-grid dd, .report-callout strong, .report-findings article > strong { color: #172027; }
+  .analysis-report h2, .report-masthead span, .report-findings article > span { color: #17677c; }
+  .report-grid, .report-findings, .report-grid > div, .report-findings article { border-color: #cdd4d8 !important; }
+  .provenance-mark { color: #254d58 !important; }
+}

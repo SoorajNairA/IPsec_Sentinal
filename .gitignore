@@ -1,1 +1,15 @@
 .worktrees/
+runs/
+dataset/
+__pycache__/
+*.pyc
+.venv/
+configs/external-datasets.local.yaml
+external-data/
+.external-data/
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+frontend/test-results/
+frontend/playwright-report/
+frontend/artifacts/
