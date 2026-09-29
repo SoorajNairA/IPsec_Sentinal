@@ -16,6 +16,7 @@ from ipsec_sentinel.cloud.gcloud import GcloudClient
 from ipsec_sentinel.cloud.manifest import (
     APPROVED_MANIFEST,
     command_digest,
+    inspect_deployment,
     render_creation_commands,
     render_post_provision_commands,
 )
@@ -44,6 +45,49 @@ def _config(root: Path) -> GcpLabConfig:
 
 
 class GcpPrototypeTest(unittest.TestCase):
+    def test_resource_inspection_uses_bounded_slow_read_timeout(self) -> None:
+        observed: list[float] = []
+
+        class Client:
+            def run_json(self, args: tuple[str, ...], *, timeout: float):
+                observed.append(timeout)
+                if args[:2] == ("projects", "describe"):
+                    return {"projectNumber": APPROVED_MANIFEST.project_number}
+                if args[:3] == ("compute", "networks", "describe"):
+                    return {"autoCreateSubnetworks": False}
+                if args[:4] == ("compute", "networks", "subnets", "describe"):
+                    return {"ipCidrRange": APPROVED_MANIFEST.subnet_cidr}
+                if args[:3] == ("compute", "instances", "list"):
+                    return [
+                        {
+                            "name": name,
+                            "status": "TERMINATED",
+                            "labels": {"deployment": APPROVED_MANIFEST.deployment_id, "scenario": scenario},
+                            "machineType": "/" + APPROVED_MANIFEST.machine_type,
+                            "serviceAccounts": [],
+                            "canIpForward": True,
+                            "tags": {"items": ["ipsec-sentinel-vpn"]},
+                            "networkInterfaces": [{"network": "/" + APPROVED_MANIFEST.network, "subnetwork": "/" + APPROVED_MANIFEST.subnet}],
+                            "disks": [{"diskSizeGb": str(APPROVED_MANIFEST.boot_disk_size_gb)}],
+                        }
+                        for scenario, name in APPROVED_MANIFEST.instance_by_scenario.items()
+                    ]
+                if args[:3] == ("compute", "disks", "describe"):
+                    return {"type": "/" + APPROVED_MANIFEST.boot_disk_type}
+                if args[:3] == ("compute", "firewall-rules", "describe"):
+                    return {
+                        "allowed": [{"IPProtocol": "udp", "ports": ["500", "4500"]}],
+                        "sourceRanges": ["8.8.8.8/32"],
+                        "targetTags": ["ipsec-sentinel-vpn"],
+                        "network": "/" + APPROVED_MANIFEST.network,
+                    }
+                raise AssertionError(args)
+
+        result = inspect_deployment(Client(), APPROVED_MANIFEST, "8.8.8.8/32")
+        self.assertTrue(result.ready, result.issues)
+        self.assertGreater(len(observed), 4)
+        self.assertEqual(set(observed), {60})
+
     def test_endpoint_helper_is_importable_inside_network_namespace(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)

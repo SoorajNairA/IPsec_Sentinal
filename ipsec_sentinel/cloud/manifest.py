@@ -22,6 +22,7 @@ VPN_TAG = "ipsec-sentinel-vpn"
 UDP_FIREWALL = "ipsec-sentinel-ike-natt"
 SSH_FIREWALL = "ipsec-sentinel-provision-ssh"
 DEPLOYMENT_ID = "gcp-live-lab-v1"
+READ_ONLY_GCLOUD_TIMEOUT_SECONDS = 60
 
 
 @dataclass(frozen=True)
@@ -220,12 +221,14 @@ def inspect_deployment(
     issues: list[str] = []
     present: list[str] = []
     project = client.run_json(
-        ("projects", "describe", manifest.project_id), timeout=20
+        ("projects", "describe", manifest.project_id),
+        timeout=READ_ONLY_GCLOUD_TIMEOUT_SECONDS,
     )
     if not isinstance(project, dict) or str(project.get("projectNumber")) != manifest.project_number:
         issues.append("project number does not match the approved manifest")
     network = client.run_json(
-        ("compute", "networks", "describe", manifest.network), timeout=20
+        ("compute", "networks", "describe", manifest.network),
+        timeout=READ_ONLY_GCLOUD_TIMEOUT_SECONDS,
     )
     if isinstance(network, dict):
         present.append(manifest.network)
@@ -238,7 +241,7 @@ def inspect_deployment(
             "compute", "networks", "subnets", "describe", manifest.subnet,
             f"--region={manifest.region}",
         ),
-        timeout=20,
+        timeout=READ_ONLY_GCLOUD_TIMEOUT_SECONDS,
     )
     if isinstance(subnet, dict):
         present.append(manifest.subnet)
@@ -251,7 +254,7 @@ def inspect_deployment(
             "compute", "instances", "list", f"--zones={manifest.zone}",
             "--filter=name:(" + " OR ".join(manifest.instance_by_scenario.values()) + ")",
         ),
-        timeout=30,
+        timeout=READ_ONLY_GCLOUD_TIMEOUT_SECONDS,
     )
     rows = instances if isinstance(instances, list) else []
     by_name = {str(item.get("name")): item for item in rows if isinstance(item, dict)}
@@ -289,12 +292,13 @@ def inspect_deployment(
             issues.append(f"instance boot disk drifted: {name}")
         disk = client.run_json(
             ("compute", "disks", "describe", name, f"--zone={manifest.zone}"),
-            timeout=20,
+            timeout=READ_ONLY_GCLOUD_TIMEOUT_SECONDS,
         )
         if not isinstance(disk, dict) or not str(disk.get("type", "")).endswith("/" + manifest.boot_disk_type):
             issues.append(f"instance disk type drifted: {name}")
     firewall = client.run_json(
-        ("compute", "firewall-rules", "describe", UDP_FIREWALL), timeout=20
+        ("compute", "firewall-rules", "describe", UDP_FIREWALL),
+        timeout=READ_ONLY_GCLOUD_TIMEOUT_SECONDS,
     )
     if isinstance(firewall, dict):
         present.append(UDP_FIREWALL)

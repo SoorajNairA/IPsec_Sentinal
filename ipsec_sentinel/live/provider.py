@@ -8,6 +8,7 @@ from time import monotonic, sleep
 from typing import Mapping, Protocol
 
 from ipsec_sentinel.artifacts import write_json_atomic
+from ipsec_sentinel.cloud.manifest import READ_ONLY_GCLOUD_TIMEOUT_SECONDS
 
 from ipsec_sentinel.session import SecureSession
 
@@ -148,7 +149,7 @@ class GcpLabProvider:
                 "compute", "instances", "describe", self._instance,
                 f"--zone={self.config.zone}",
             ),
-            timeout=30,
+            timeout=READ_ONLY_GCLOUD_TIMEOUT_SECONDS,
         )
         if not isinstance(value, dict):
             raise RuntimeError("Compute Engine instance description is malformed")
@@ -270,7 +271,7 @@ class GcpLabProvider:
                     "compute", "instances", "get-serial-port-output", self._instance,
                     f"--zone={self.config.zone}", "--port=1", "--start=0",
                 ),
-                timeout=30,
+                timeout=READ_ONLY_GCLOUD_TIMEOUT_SECONDS,
             )
             if isinstance(serial, dict):
                 marker_times = tuple(
