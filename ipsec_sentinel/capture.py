@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from time import monotonic, sleep
-from typing import TextIO
+from typing import Callable, TextIO
 import os
 import re
 import signal
@@ -40,6 +40,8 @@ class CaptureSession:
         drain_seconds: float = 0.25,
         capture_filter: str = CAPTURE_FILTER,
         capture_buffer_kib: int = 32 * 1024,
+        process_observer: Callable[[str, int], None] | None = None,
+        process_role: str = "tcpdump",
     ) -> None:
         if capture_buffer_kib <= 0:
             raise ValueError("capture buffer must be positive")
@@ -51,6 +53,8 @@ class CaptureSession:
         self.drain_seconds = drain_seconds
         self.capture_filter = capture_filter
         self.capture_buffer_kib = capture_buffer_kib
+        self._process_observer = process_observer
+        self._process_role = process_role
         self._process: subprocess.Popen[str] | None = None
         self._log: TextIO | None = None
 
@@ -96,6 +100,15 @@ class CaptureSession:
             stderr=self._log,
             text=True,
         )
+        if self._process_observer is not None:
+            try:
+                self._process_observer(self._process_role, self._process.pid)
+            except BaseException:
+                self._process.kill()
+                self._process.wait(timeout=self.timeout)
+                self._close_log()
+                self._process = None
+                raise
         deadline = monotonic() + self.timeout
         while monotonic() < deadline:
             if self._process.poll() is not None:

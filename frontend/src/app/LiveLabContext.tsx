@@ -171,7 +171,7 @@ export function liveLabReducer(state: LiveLabState, action: LiveLabReducerAction
   }
   if (action.type === 'SESSION_SYNCED') {
     if (!state.session || action.session.session_id !== state.session.session_id) return state
-    if (action.session.latest_event_id > state.latestEventId) return state
+    if (action.session.latest_event_id !== state.latestEventId) return state
     return { ...state, session: { ...action.session, latest_event_id: state.latestEventId } }
   }
   const event = action.event

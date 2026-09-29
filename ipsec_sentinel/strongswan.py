@@ -74,10 +74,12 @@ class StrongSwanPair:
         *,
         timeout: float = 10,
         euid: Callable[[], int] = os.geteuid,
+        process_observer: Callable[[str, int], None] | None = None,
     ) -> None:
         self.log = log
         self.timeout = timeout
         self._euid = euid
+        self._process_observer = process_observer
         self.files: dict[str, GatewayFiles] = {}
         self._processes: dict[str, subprocess.Popen[str]] = {}
         self._stdout_files: dict[str, TextIO] = {}
@@ -138,6 +140,8 @@ class StrongSwanPair:
                 )
                 self._processes[spec.name] = process
                 files.pid.write_text(f"{process.pid}\n", encoding="ascii")
+                if self._process_observer is not None:
+                    self._process_observer(f"strongswan-{spec.name}", process.pid)
                 self._wait_for_socket(spec.name)
         except BaseException:
             self.stop()

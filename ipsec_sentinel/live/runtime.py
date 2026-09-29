@@ -10,6 +10,7 @@ import fcntl
 import json
 import os
 import signal
+import shutil
 import stat
 import subprocess
 
@@ -203,13 +204,12 @@ def process_start_identity(pid: int) -> str | None:
             return None
         fields = stat[closing + 2 :].split()
         start_ticks = fields[19]
-        executable = os.readlink(proc / "exe")
         boot_id = Path("/proc/sys/kernel/random/boot_id").read_text(
             encoding="ascii"
         ).strip()
     except (FileNotFoundError, PermissionError, OSError, IndexError):
         return None
-    return f"{boot_id}:{start_ticks}:{executable}"
+    return f"{boot_id}:{start_ticks}"
 
 
 def record_resource(
@@ -333,14 +333,53 @@ def recover_stale_runtime(
         key=lambda item: len(item.parts),
         reverse=True,
     )
+    invalid_paths = [
+        path for path in paths
+        if not any(path == root or root in path.parents for root in roots)
+    ]
+    for path in invalid_paths:
+        actions.append(
+            {
+                "resource": f"path:{path}",
+                "status": "FAILED",
+                "error": "path is outside the approved runtime roots",
+                "exception_type": "ValueError",
+            }
+        )
+
+    preservation_failed = False
+    recovery_root = ownership_path.parent / "recovered-runtime"
+    for root in roots:
+        try:
+            _preserve_regular_files(root, recovery_root)
+        except BaseException as error:
+            preservation_failed = True
+            actions.append(
+                {
+                    "resource": f"evidence:{root}",
+                    "status": "FAILED",
+                    "error": str(error) or type(error).__name__,
+                    "exception_type": type(error).__name__,
+                }
+            )
+        else:
+            actions.append(
+                {
+                    "resource": f"evidence:{root}",
+                    "status": "PRESERVED",
+                    "error": None,
+                }
+            )
+
     for path in paths:
         if not any(path == root or root in path.parents for root in roots):
+            continue
+        if preservation_failed:
             actions.append(
                 {
                     "resource": f"path:{path}",
-                    "status": "FAILED",
-                    "error": "path is outside the approved runtime roots",
-                    "exception_type": "ValueError",
+                    "status": "SKIPPED_PRESERVATION_FAILED",
+                    "error": None,
                 }
             )
             continue
@@ -369,6 +408,27 @@ def _remove_exact_path(path: Path) -> None:
         path.rmdir()
         return
     path.unlink(missing_ok=True)
+
+
+def _preserve_regular_files(runtime_root: Path, recovery_root: Path) -> None:
+    try:
+        mode = runtime_root.lstat().st_mode
+    except FileNotFoundError:
+        return
+    candidates = (
+        [runtime_root]
+        if stat.S_ISREG(mode)
+        else sorted(runtime_root.rglob("*")) if stat.S_ISDIR(mode) else []
+    )
+    for source in candidates:
+        source_mode = source.lstat().st_mode
+        if not stat.S_ISREG(source_mode):
+            continue
+        relative = source.relative_to(runtime_root)
+        destination = recovery_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True, mode=0o750)
+        if not destination.exists():
+            shutil.copy2(source, destination)
 
 
 def _terminate_process(pid: int) -> None:

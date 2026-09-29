@@ -58,6 +58,23 @@ describe('Live Lab reducer and provider', () => {
     expect(state.problem?.code).toBe('SESSION_BUSY')
   })
 
+  it('does not let a delayed older snapshot roll back replayed event state', () => {
+    let state = liveLabReducer(initial, { type: 'SESSION_LOADED', session: baseSession, replayFromStart: true })
+    state = liveLabReducer(state, { type: 'EVENT', event: liveEvent(1, 'session.created', 'IDLE') })
+    state = liveLabReducer(state, { type: 'EVENT', event: liveEvent(2, 'tunnel.active', 'TUNNEL_ACTIVE') })
+    const delayed = { ...baseSession, latest_event_id: 1 }
+
+    state = liveLabReducer(state, { type: 'SESSION_SYNCED', session: delayed })
+
+    expect(state.latestEventId).toBe(2)
+    expect(state.session).toMatchObject({
+      state: 'TUNNEL_ACTIVE',
+      tunnel_status: 'ACTIVE',
+      latest_event_id: 2,
+    })
+    expect(state.session?.allowed_actions).not.toContain('CONNECT')
+  })
+
   it('reconnects from the last applied ID and rebuilds missed active traffic state', async () => {
     let handlers: LiveStreamHandlers | null = null
     const subscribe = vi.fn((_id: string, _after: number, next: LiveStreamHandlers) => {

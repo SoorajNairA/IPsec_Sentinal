@@ -34,6 +34,18 @@ class FailingSession(FakeSession):
         raise RuntimeError("daemon startup failed")
 
 
+class CleanupFailsOnceSession(FakeSession):
+    def __init__(self) -> None:
+        super().__init__()
+        self.cleanup_attempts = 0
+
+    def cleanup(self) -> None:
+        self.calls.append("cleanup")
+        self.cleanup_attempts += 1
+        if self.cleanup_attempts == 1:
+            raise RuntimeError("cleanup interrupted")
+
+
 class LocalLabProviderTest(unittest.TestCase):
     def test_start_and_stop_delegate_to_secure_session(self) -> None:
         session = FakeSession()
@@ -105,6 +117,19 @@ class LocalLabProviderTest(unittest.TestCase):
         provider.stop_scenario()
         provider.stop_scenario()
         self.assertEqual(session.calls.count("cleanup"), 1)
+
+    def test_cleanup_failure_retains_ownership_until_retry_succeeds(self) -> None:
+        session = CleanupFailsOnceSession()
+        provider = LocalLabProvider(session)  # type: ignore[arg-type]
+        provider.start_scenario("secure-baseline")
+
+        with self.assertRaisesRegex(RuntimeError, "cleanup interrupted"):
+            provider.stop_scenario()
+
+        self.assertEqual(provider.health(), {"ready": True, "provider": "local"})
+        provider.stop_scenario()
+        self.assertEqual(session.cleanup_attempts, 2)
+        self.assertEqual(provider.health(), {"ready": False, "provider": "local"})
 
     def test_gcp_boundary_has_no_constructor_or_filesystem_side_effect(self) -> None:
         provider = GcpLabProvider()

@@ -20,6 +20,31 @@ FULL_WINDOW = (0.0, 4_000_000_000.0)
 
 
 class CaptureValidationTest(unittest.TestCase):
+    def test_start_reports_tcpdump_identity_before_waiting_for_capture_ready(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            observed: list[tuple[str, int]] = []
+            process = Mock()
+            process.pid = 4132
+            process.poll.return_value = None
+
+            def spawn(*_args, **_kwargs):
+                (root / "live.pcap").write_bytes(b"\0" * 24)
+                return process
+
+            session = CaptureSession(
+                root / "live.pcap",
+                root / "tcpdump.log",
+                process_observer=lambda role, pid: observed.append((role, pid)),
+            )
+            self.addCleanup(session._close_log)
+            with patch("ipsec_sentinel.capture.os.geteuid", return_value=0), patch(
+                "ipsec_sentinel.capture.subprocess.Popen", side_effect=spawn
+            ):
+                self.assertEqual(session.start(), 4132)
+
+            self.assertEqual(observed, [("tcpdump", 4132)])
+
     def validate(self, fixture: str, peers: tuple[str, str] = PEERS):
         return validate_pcap(
             FIXTURES / fixture,

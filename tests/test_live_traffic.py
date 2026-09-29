@@ -23,7 +23,7 @@ class TrafficSession(FakeSession):
 
     def refresh_sas(self) -> dict[str, str]:
         self._call("refresh_sas")
-        return {"gateway-a": "ESTABLISHED", "gateway-b": "ESTABLISHED"}
+        return self.sas
 
 
 class FakeGenerator:

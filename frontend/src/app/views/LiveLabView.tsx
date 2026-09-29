@@ -31,10 +31,10 @@ function MysteryComparison({ events }: { events: ReturnType<typeof useLiveLab>['
 
 export function LiveLabView() {
   const live = useLiveLab()
-  const { catalogue, session, events, analysis, problem } = live
+  const { catalogue, session, events, analysis, problem, loadCatalogue } = live
   useEffect(() => {
-    void live.loadCatalogue()
-  }, [live.loadCatalogue])
+    void loadCatalogue()
+  }, [loadCatalogue])
   if (!session) {
     return (
       <div className="live-lab-start">

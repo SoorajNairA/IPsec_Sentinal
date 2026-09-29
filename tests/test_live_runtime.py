@@ -5,12 +5,14 @@ from tempfile import TemporaryDirectory
 import json
 import socket
 import unittest
+from unittest.mock import patch
 
 from ipsec_sentinel.live.runtime import (
     LiveLabLock,
     LiveOwnerActive,
     OwnedProcess,
     RuntimeOwnership,
+    process_start_identity,
     record_resource,
     recover_stale_runtime,
 )
@@ -21,6 +23,20 @@ from tests.test_live_orchestrator import InlineExecutor
 
 
 class LiveRuntimeTest(unittest.TestCase):
+    def test_process_identity_remains_stable_when_the_same_pid_execs(self) -> None:
+        stat_text = "551 (ip) S " + " ".join(str(value) for value in range(1, 40))
+        with patch(
+            "ipsec_sentinel.live.runtime.Path.read_text",
+            side_effect=(stat_text, "boot-id\n", stat_text, "boot-id\n"),
+        ), patch(
+            "ipsec_sentinel.live.runtime.os.readlink",
+            side_effect=("/usr/bin/ip", "/usr/libexec/ipsec/charon-systemd"),
+        ):
+            before_exec = process_start_identity(551)
+            after_exec = process_start_identity(551)
+
+        self.assertEqual(before_exec, after_exec)
+
     def test_lock_refuses_a_second_live_owner_and_can_be_reacquired(self) -> None:
         with TemporaryDirectory() as directory:
             path = Path(directory) / "live.lock"
@@ -134,6 +150,51 @@ class LiveRuntimeTest(unittest.TestCase):
             self.assertFalse(socket_path.exists())
             self.assertFalse(runtime.exists())
 
+    def test_stale_recovery_preserves_regular_runtime_evidence_before_removal(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            runtime = root / "runtime"
+            capture_dir = runtime / "capture"
+            capture_dir.mkdir(parents=True)
+            capture = capture_dir / "full-evidence.pcap"
+            capture.write_bytes(b"partial-but-auditable-capture")
+            log = runtime / "gateway-a" / "charon.log"
+            log.parent.mkdir()
+            log.write_text("diagnostic log", encoding="utf-8")
+            ownership_path = root / "runtime-ownership.json"
+            RuntimeOwnership(
+                session_id="SNT-EVIDENCE1",
+                owner_pid=10,
+                owner_start_identity="dead-owner",
+                runtime_paths=(
+                    str(capture),
+                    str(capture_dir),
+                    str(log),
+                    str(log.parent),
+                    str(runtime),
+                ),
+            ).write(ownership_path)
+
+            report = recover_stale_runtime(
+                ownership_path,
+                runtime_roots=(runtime,),
+                read_process_identity=lambda _pid: None,
+                terminate_process=lambda _pid: None,
+                reset_namespace=lambda _name: None,
+            )
+
+            recovered = root / "recovered-runtime"
+            self.assertEqual(report.status, "RECOVERED")
+            self.assertEqual(
+                (recovered / "capture" / "full-evidence.pcap").read_bytes(),
+                b"partial-but-auditable-capture",
+            )
+            self.assertEqual(
+                (recovered / "gateway-a" / "charon.log").read_text(encoding="utf-8"),
+                "diagnostic log",
+            )
+            self.assertFalse(runtime.exists())
+
     def test_reused_pid_identity_is_never_terminated(self) -> None:
         with TemporaryDirectory() as directory:
             root = Path(directory)
@@ -234,6 +295,15 @@ class LiveRuntimeTest(unittest.TestCase):
             created = orchestrator.create_session("secure-baseline")
             ownership_path = Path(directory) / created.session_id / "runtime-ownership.json"
             self.assertTrue(ownership_path.is_file())
+            reserved = RuntimeOwnership.read(ownership_path)
+            self.assertEqual(
+                set(reserved.namespaces),
+                {"ips-client", "ips-gwa", "ips-gwb", "ips-server"},
+            )
+            self.assertIn(
+                str((Path("/run/ipsec-sentinel") / created.session_id).resolve()),
+                reserved.runtime_paths,
+            )
 
             orchestrator.submit(created.session_id, "CONNECT", {}).result()
 
@@ -251,6 +321,24 @@ class LiveRuntimeTest(unittest.TestCase):
             self.assertFalse(ownership_path.exists())
             orchestrator.close()
             self.assertFalse((Path(directory) / ".live-lab.lock").exists())
+
+    def test_explicit_host_lock_rejects_agents_with_different_evidence_roots(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            lock_path = root / "host-runtime" / ".live-lab.lock"
+            first = LiveLabOrchestrator(
+                root / "agent-a",
+                executor=InlineExecutor(),
+                lock_path=lock_path,
+            )
+            self.addCleanup(first.close)
+
+            with self.assertRaises(LiveOwnerActive):
+                LiveLabOrchestrator(
+                    root / "agent-b",
+                    executor=InlineExecutor(),
+                    lock_path=lock_path,
+                )
 
     def test_failed_cleanup_keeps_ownership_for_next_startup_recovery(self) -> None:
         with TemporaryDirectory() as directory:

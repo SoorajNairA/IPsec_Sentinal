@@ -87,11 +87,9 @@ class LocalLabProvider:
     def stop_scenario(self) -> None:
         if not self._owns_resources:
             return
-        try:
-            self.session.cleanup()
-        finally:
-            self._endpoint = None
-            self._owns_resources = False
+        self.session.cleanup()
+        self._endpoint = None
+        self._owns_resources = False
 
 
 class GcpLabProvider:

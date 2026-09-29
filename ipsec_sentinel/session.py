@@ -57,6 +57,7 @@ class SecureSession:
         *,
         primary_capture_name: str,
         keep_lab: bool = False,
+        process_observer: Callable[[str, int], None] | None = None,
     ) -> None:
         if primary_capture_name not in ("encrypted.pcap", "full-evidence.pcap"):
             raise ValueError("unsupported primary capture name")
@@ -64,7 +65,7 @@ class SecureSession:
         self.log = log
         self.keep_lab = keep_lab
         self.topology = Topology(log)
-        self.pair = StrongSwanPair(log)
+        self.pair = StrongSwanPair(log, process_observer=process_observer)
         self.primary_destination = run_dir / primary_capture_name
         self.runtime_dir = Path("/run/ipsec-sentinel") / run_dir.name / "capture"
         self.temporary_pcaps = {
@@ -79,18 +80,24 @@ class SecureSession:
         }
         self.captures = {
             "primary": CaptureSession(
-                self.temporary_pcaps["primary"], run_dir / "tcpdump.log"
+                self.temporary_pcaps["primary"], run_dir / "tcpdump.log",
+                process_observer=process_observer,
+                process_role="tcpdump-primary",
             ),
             "gateway-a": CaptureSession(
                 self.temporary_pcaps["gateway-a"],
                 run_dir / "tcpdump-audit-gateway-a.log",
                 capture_filter=AUDIT_FILTER,
+                process_observer=process_observer,
+                process_role="tcpdump-gateway-a",
             ),
             "gateway-b": CaptureSession(
                 self.temporary_pcaps["gateway-b"],
                 run_dir / "tcpdump-audit-gateway-b.log",
                 namespace="ips-gwb",
                 capture_filter=AUDIT_FILTER,
+                process_observer=process_observer,
+                process_role="tcpdump-gateway-b",
             ),
         }
         self.scenario: Scenario | None = None

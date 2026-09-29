@@ -1,7 +1,7 @@
 from io import StringIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from unittest.mock import Mock
+from unittest.mock import Mock, patch
 import unittest
 import signal
 
@@ -10,6 +10,52 @@ from ipsec_sentinel.scenario import Scenario, scenario_path
 
 
 class StrongSwanRenderingTest(unittest.TestCase):
+    def test_start_reports_each_charon_identity_before_socket_wait(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            observed: list[tuple[str, int]] = []
+            pair = StrongSwanPair(
+                StringIO(),
+                euid=lambda: 0,
+                process_observer=lambda role, pid: observed.append((role, pid)),
+            )
+
+            def render(run_dir: Path, **_kwargs: object):
+                pair.files = {
+                    name: GatewayFiles(
+                        name,
+                        "ips-gwa" if name == "gateway-a" else "ips-gwb",
+                        run_dir / "runtime" / name / "strongswan.conf",
+                        run_dir / "runtime" / name / "swanctl.conf",
+                        run_dir / "live-runtime" / name / "charon.vici",
+                        run_dir / "live-runtime" / name / "charon.pid",
+                        run_dir / "live-runtime" / name / "charon.log",
+                    )
+                    for name in ("gateway-a", "gateway-b")
+                }
+                for files in pair.files.values():
+                    files.strongswan.parent.mkdir(parents=True, exist_ok=True)
+                    files.strongswan.write_text("config", encoding="utf-8")
+                return pair.files
+
+            processes = []
+            for pid in (5101, 5102):
+                process = Mock()
+                process.pid = pid
+                process.poll.return_value = 0
+                processes.append(process)
+            pair.render_configs = render
+            pair._wait_for_socket = Mock()
+
+            with patch("ipsec_sentinel.strongswan.subprocess.Popen", side_effect=processes):
+                pair.start(root)
+
+            self.assertEqual(
+                observed,
+                [("strongswan-gateway-a", 5101), ("strongswan-gateway-b", 5102)],
+            )
+            pair.stop()
+
     def test_stop_attempts_both_daemons_when_the_first_wait_fails(self) -> None:
         pair = StrongSwanPair(StringIO(), timeout=0.1)
         first = Mock()

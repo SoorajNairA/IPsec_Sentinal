@@ -93,7 +93,10 @@ class ActionSession(TrafficSession):
         self.pfs = PfsObservation(
             self.pfs_status,
             True,
-            ("fresh CHILD-SA evidence",),
+            (
+                "fresh CHILD-SA evidence",
+                f"pfs_configured={self.scenario.ipsec.pfs if self.scenario else 'unknown'}",
+            ),
         )
         return self.pfs
 
@@ -125,6 +128,32 @@ def fake_analysis(*_args: object, **_kwargs: object) -> dict[str, object]:
             },
             "ike": {"encryption": {"normalized": "AES-256-GCM", "provenance": "OBSERVED"}},
             "pfs": {"state": "disabled", "provenance": "DERIVED"},
+            "evidence": [
+                {
+                    "id": "ev-lab-config-001",
+                    "provenance": "OBSERVED",
+                    "description": "Controlled run configuration recorded scenario no-pfs",
+                    "raw_value": {
+                        "pfs": False,
+                        "ike_proposal": "aes256gcm16-prfsha384-ecp384",
+                        "esp_proposal": "aes256gcm16",
+                    },
+                    "normalized_value": {"encryption": "AES-256-GCM"},
+                    "source_component": "controlled-lab-artifacts",
+                },
+                {
+                    "id": "ev-lab-pfs-001",
+                    "provenance": "DERIVED",
+                    "description": "Fresh CHILD-SA DH behavior observed",
+                    "raw_value": [
+                        "rekey_completed=True",
+                        "pfs_configured=False",
+                        "selected proposal: ESP:AES_GCM_16_256/NO_EXT_SEQ",
+                    ],
+                    "normalized_value": "disabled",
+                    "source_component": "controlled-lab-artifacts",
+                },
+            ],
             "traffic_intelligence": {
                 "state": "PREDICTED",
                 "predicted_class": "video",
@@ -331,6 +360,14 @@ class LiveActionTest(unittest.TestCase):
             self.assertNotIn("no-pfs", unrevealed_events)
             self.assertNotIn('"scenario_id"', unrevealed_events)
             self.assertNotIn('"configured":', unrevealed_events)
+            self.assertNotIn("pfs_configured", unrevealed_events)
+            self.assertNotIn("ev-lab-config-001", unrevealed_events)
+            analysis_event = next(
+                item
+                for item in orchestrator.events(session_id, 0)
+                if item.type == "analysis.completed"
+            )
+            self.assertEqual(analysis_event.data["analysis"]["pfs"]["state"], "disabled")
 
             orchestrator.reveal(session_id).result()
             revealed = orchestrator.get_session(session_id)

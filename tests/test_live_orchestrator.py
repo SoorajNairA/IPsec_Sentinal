@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from concurrent.futures import Future
+from concurrent.futures import Future, ThreadPoolExecutor
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Barrier, BrokenBarrierError
 from types import SimpleNamespace
 from typing import Callable
 import json
+import itertools
 import unittest
+from unittest.mock import patch
 
 from ipsec_sentinel.live.models import (
     CaptureStatus,
@@ -18,6 +21,10 @@ from ipsec_sentinel.live.models import (
 )
 from ipsec_sentinel.live.orchestrator import LiveLabOrchestrator
 from ipsec_sentinel.live.provider import LocalLabProvider
+from ipsec_sentinel.scenario import Scenario, scenario_path
+
+
+FIXTURES = Path("tests/fixtures")
 
 
 IKE_LINES = (
@@ -45,8 +52,10 @@ class HoldingExecutor:
     def __init__(self) -> None:
         self.function: Callable[[], object] | None = None
         self.future: Future[object] | None = None
+        self.submission_count = 0
 
     def submit(self, function: Callable[[], object]) -> Future[object]:
+        self.submission_count += 1
         self.function = function
         self.future = Future()
         return self.future
@@ -60,10 +69,21 @@ class HoldingExecutor:
 
 
 class FakeSession:
-    def __init__(self, run_dir: Path, _log: object, *, fail_at: str | None = None) -> None:
+    def __init__(
+        self,
+        run_dir: Path,
+        _log: object,
+        *,
+        fail_at: str | None = None,
+        empty_evidence: bool = False,
+    ) -> None:
         self.run_dir = run_dir
         self.log = _log
         self.fail_at = fail_at
+        self.empty_evidence = empty_evidence
+        self.scenario: Scenario | None = None
+        self.sas: dict[str, str] = {}
+        self.xfrm: dict[str, str] = {}
         self.calls: list[object] = []
         self.log_path = run_dir / "charon.log"
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -71,6 +91,7 @@ class FakeSession:
         self.pair = SimpleNamespace(
             files={"gateway-a": SimpleNamespace(log=self.log_path)}
         )
+        self.captures = {"primary": SimpleNamespace(running=True, pid=None)}
 
     def _call(self, name: str) -> None:
         self.calls.append(name)
@@ -87,7 +108,8 @@ class FakeSession:
         self.calls.append(("load_scenario", scenario_id))
         if self.fail_at == "load_scenario":
             raise RuntimeError(f"private scenario {scenario_id} failed")
-        return object()
+        self.scenario = Scenario.load(scenario_path(scenario_id))
+        return self.scenario
 
     def setup_topology(self) -> None:
         self._call("setup_topology")
@@ -112,11 +134,25 @@ class FakeSession:
 
     def wait_for_sa(self) -> dict[str, str]:
         self._call("wait_for_sa")
-        return {"gateway-a": "ESTABLISHED INSTALLED", "gateway-b": "ESTABLISHED INSTALLED"}
+        if self.empty_evidence:
+            self.sas = {"gateway-a": "", "gateway-b": ""}
+        else:
+            self.sas = {
+                gateway: (FIXTURES / f"swanctl-{gateway}.txt").read_text(encoding="utf-8")
+                for gateway in ("gateway-a", "gateway-b")
+            }
+        return self.sas
 
     def collect_xfrm(self) -> dict[str, str]:
         self._call("collect_xfrm")
-        return {"gateway-a": "STATE\nPOLICY\n", "gateway-b": "STATE\nPOLICY\n"}
+        if self.empty_evidence:
+            self.xfrm = {"gateway-a": "STATE\nPOLICY\n", "gateway-b": "STATE\nPOLICY\n"}
+        else:
+            self.xfrm = {
+                gateway: (FIXTURES / f"xfrm-{gateway}.txt").read_text(encoding="utf-8")
+                for gateway in ("gateway-a", "gateway-b")
+            }
+        return self.xfrm
 
     def cleanup(self) -> None:
         self._call("cleanup")
@@ -130,11 +166,17 @@ class LiveLabOrchestratorTest(unittest.TestCase):
         executor: object | None = None,
         fail_at: str | None = None,
         mystery_scenario: str = "no-pfs",
+        empty_evidence: bool = False,
     ) -> tuple[LiveLabOrchestrator, list[FakeSession]]:
         sessions: list[FakeSession] = []
 
         def factory(run_dir: Path, log: object, **_kwargs: object) -> FakeSession:
-            session = FakeSession(run_dir, log, fail_at=fail_at)
+            session = FakeSession(
+                run_dir,
+                log,
+                fail_at=fail_at,
+                empty_evidence=empty_evidence,
+            )
             sessions.append(session)
             return session
 
@@ -173,6 +215,73 @@ class LiveLabOrchestratorTest(unittest.TestCase):
             self.assertEqual(caught.exception.code, "SESSION_BUSY")
             executor.run()
             self.assertIsNone(future.result())
+
+    def test_simultaneous_commands_commit_only_one_acceptance(self) -> None:
+        with TemporaryDirectory() as directory:
+            executor = HoldingExecutor()
+            orchestrator, _ = self.make_orchestrator(directory, executor=executor)
+            session = orchestrator.create_session("secure-baseline")
+            barrier = Barrier(2)
+            from ipsec_sentinel.live import orchestrator as orchestrator_module
+            original = orchestrator_module.validate_action
+
+            def synchronized_validation(snapshot, action):
+                try:
+                    barrier.wait(timeout=0.2)
+                except BrokenBarrierError:
+                    pass
+                return original(snapshot, action)
+
+            def submit() -> object:
+                try:
+                    return orchestrator.submit(session.session_id, LiveAction.CONNECT, {})
+                except LiveProblem as error:
+                    return error
+
+            with patch(
+                "ipsec_sentinel.live.orchestrator.validate_action",
+                side_effect=synchronized_validation,
+            ), ThreadPoolExecutor(max_workers=2) as pool:
+                outcomes = [future.result() for future in (pool.submit(submit), pool.submit(submit))]
+
+            accepted = [item for item in outcomes if isinstance(item, Future)]
+            rejected = [item for item in outcomes if isinstance(item, LiveProblem)]
+            self.assertEqual((len(accepted), len(rejected), executor.submission_count), (1, 1, 1))
+            self.assertEqual(rejected[0].code, "SESSION_BUSY")
+
+    def test_simultaneous_session_creation_reserves_only_one_testbed(self) -> None:
+        with TemporaryDirectory() as directory:
+            ids = (f"SNT-RACE{index:04d}" for index in itertools.count(1))
+            orchestrator, _ = self.make_orchestrator(directory)
+            orchestrator._id_factory = lambda: next(ids)  # type: ignore[attr-defined]
+            barrier = Barrier(2)
+            original = orchestrator._active_record  # type: ignore[attr-defined]
+
+            def synchronized_active_record():
+                current = original()
+                try:
+                    barrier.wait(timeout=0.2)
+                except BrokenBarrierError:
+                    pass
+                return current
+
+            def create() -> object:
+                try:
+                    return orchestrator.create_session("secure-baseline")
+                except LiveProblem as error:
+                    return error
+
+            with patch.object(
+                orchestrator,
+                "_active_record",
+                side_effect=synchronized_active_record,
+            ), ThreadPoolExecutor(max_workers=2) as pool:
+                outcomes = [future.result() for future in (pool.submit(create), pool.submit(create))]
+
+            created = [item for item in outcomes if not isinstance(item, LiveProblem)]
+            rejected = [item for item in outcomes if isinstance(item, LiveProblem)]
+            self.assertEqual((len(created), len(rejected)), (1, 1))
+            self.assertEqual(rejected[0].code, "ACTIVE_SESSION_EXISTS")
 
     def test_connect_orders_real_lifecycle_and_evidence_before_tunnel_active(self) -> None:
         with TemporaryDirectory() as directory:
@@ -243,6 +352,18 @@ class LiveLabOrchestratorTest(unittest.TestCase):
             self.assertEqual(failed.failure["operation"], "CONNECT")  # type: ignore[index]
             self.assertNotIn("no-pfs", json.dumps(failed.to_dict()))
             self.assertEqual(sessions[0].calls.count("cleanup"), 1)
+
+    def test_connect_rejects_empty_sa_and_xfrm_evidence_before_active(self) -> None:
+        with TemporaryDirectory() as directory:
+            orchestrator, _ = self.make_orchestrator(directory, empty_evidence=True)
+            created = orchestrator.create_session("secure-baseline")
+
+            with self.assertRaisesRegex(RuntimeError, "tunnel evidence"):
+                orchestrator.submit(created.session_id, LiveAction.CONNECT, {}).result()
+
+            failed = orchestrator.get_session(created.session_id)
+            self.assertEqual(failed.state, SessionState.FAILED)
+            self.assertNotEqual(failed.tunnel_status, TunnelStatus.ACTIVE)
 
     def test_mystery_identity_stays_server_side_before_reveal(self) -> None:
         with TemporaryDirectory() as directory:

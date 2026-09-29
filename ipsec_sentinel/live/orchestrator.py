@@ -7,8 +7,9 @@ from dataclasses import asdict, dataclass, field, replace
 from datetime import datetime, timezone
 from pathlib import Path
 from secrets import choice, randbits, token_hex
-from threading import Event, Thread
+from threading import Event, Lock, Thread
 from typing import TextIO
+import os
 
 from ipsec_sentinel.live.events import EventStore, LiveEvent
 from ipsec_sentinel.live.models import (
@@ -47,7 +48,7 @@ from ipsec_sentinel.live.runtime import (
 from ipsec_sentinel.session import SecureSession
 from ipsec_sentinel.artifacts import write_json_atomic, write_text_atomic
 from ipsec_sentinel.dataset.models import WorkloadWindow as DatasetWorkloadWindow
-from ipsec_sentinel.evidence import evaluate_ipsec, parse_sa
+from ipsec_sentinel.evidence import evaluate_ipsec, evaluate_tunnel, parse_sa
 from ipsec_sentinel.pcap import PcapSummary, derive_workload_esp, inspect_ml_pcap
 from ipsec_sentinel.scenario import negotiated_policy
 from ipsec_sentinel.traffic import register_builtin_generators
@@ -141,6 +142,59 @@ def _normalized_encryption(value: str) -> str:
     return "UNKNOWN"
 
 
+def _public_mystery_envelope(envelope: Mapping[str, object]) -> dict[str, object]:
+    public = deepcopy(envelope)
+    analysis = public.get("analysis")
+    if not isinstance(analysis, dict):
+        return public
+    analysis["controlled_evidence"] = {
+        "available": True,
+        "source": "controlled-lab-artifacts",
+        "withheld_until_reveal": True,
+    }
+    evidence = analysis.get("evidence")
+    if isinstance(evidence, list):
+        retained: list[object] = []
+        for item in evidence:
+            if not isinstance(item, dict):
+                retained.append(item)
+                continue
+            if item.get("id") == "ev-lab-config-001":
+                continue
+            if item.get("id") == "ev-lab-pfs-001":
+                raw = item.get("raw_value")
+                if isinstance(raw, list):
+                    item["raw_value"] = [
+                        value
+                        for value in raw
+                        if not (
+                            isinstance(value, str)
+                            and value.startswith(
+                                (
+                                    "pfs_configured=",
+                                    "expected_rekey_proposal_selected=",
+                                )
+                            )
+                        )
+                    ]
+            retained.append(item)
+        analysis["evidence"] = retained
+    findings = analysis.get("findings")
+    if isinstance(findings, list):
+        analysis["findings"] = [
+            finding
+            for finding in findings
+            if not (
+                isinstance(finding, Mapping)
+                and (
+                    finding.get("rule_id") == "IPSEC-EVIDENCE-001"
+                    or "ev-lab-config-001" in finding.get("evidence_ids", [])
+                )
+            )
+        ]
+    return public
+
+
 class LiveLabOrchestrator:
     def __init__(
         self,
@@ -159,10 +213,17 @@ class LiveLabOrchestrator:
         capture_inspector: CaptureInspector = inspect_ml_pcap,
         analysis_runner: AnalysisRunner = _default_analysis_runner,
         model_dir: Path = Path("model"),
+        lock_path: Path | None = None,
     ) -> None:
         self.root_dir = Path(root_dir)
         self.root_dir.mkdir(parents=True, exist_ok=True, mode=0o750)
-        self._runtime_lock = LiveLabLock.acquire(self.root_dir / ".live-lab.lock")
+        if lock_path is None:
+            lock_path = (
+                Path("/run/ipsec-sentinel/.live-lab.lock")
+                if getattr(os, "geteuid", lambda: 1)() == 0
+                else self.root_dir / ".live-lab.lock"
+            )
+        self._runtime_lock = LiveLabLock.acquire(lock_path)
         try:
             for ownership_path in sorted(
                 self.root_dir.glob("SNT-*/runtime-ownership.json")
@@ -201,6 +262,7 @@ class LiveLabOrchestrator:
         self._active_id: str | None = None
         self._mystery_index = 0
         self._closed = False
+        self._accept_lock = Lock()
 
     def close(self) -> None:
         if self._closed:
@@ -239,6 +301,10 @@ class LiveLabOrchestrator:
             raise RuntimeError("Live Lab shutdown errors: " + "; ".join(errors))
 
     def create_session(self, scenario_id: str) -> LiveSessionSnapshot:
+        with self._accept_lock:
+            return self._create_session(scenario_id)
+
+    def _create_session(self, scenario_id: str) -> LiveSessionSnapshot:
         active = self._active_record()
         if active is not None:
             snapshot = active.store.snapshot
@@ -277,15 +343,26 @@ class LiveLabOrchestrator:
         run_dir = self.root_dir / session_id
         run_dir.mkdir(parents=True, exist_ok=False, mode=0o750)
         log = (run_dir / "orchestration.log").open("a", encoding="utf-8")
-        secure_session = self._session_factory(
-            run_dir,
-            log,
-            primary_capture_name="full-evidence.pcap",
-        )
         ownership_path = run_dir / "runtime-ownership.json"
         ownership = RuntimeOwnership.create(session_id)
         ownership.write(ownership_path)
         record_resource(ownership_path, evidence_path=run_dir)
+
+        def observe_process(role: str, pid: int) -> None:
+            identity = process_start_identity(pid)
+            if identity is None:
+                raise RuntimeError(f"cannot identify newly started {role} process")
+            record_resource(
+                ownership_path,
+                process=OwnedProcess(pid, identity, role),
+            )
+
+        secure_session = self._session_factory(
+            run_dir,
+            log,
+            primary_capture_name="full-evidence.pcap",
+            process_observer=observe_process,
+        )
         initial = LiveSessionSnapshot(
             session_id=session_id,
             display_name=display_name,
@@ -308,6 +385,7 @@ class LiveLabOrchestrator:
         )
         self._records[session_id] = record
         self._active_id = session_id
+        self._record_live_resources(record)
         idle = transition(initial, SessionState.IDLE, "session persisted and ready")
         store.append(
             "session.created",
@@ -364,6 +442,15 @@ class LiveLabOrchestrator:
         return self.submit(session_id, LiveAction.DISCONNECT, {})
 
     def submit(
+        self,
+        session_id: str,
+        action: LiveAction | str,
+        payload: Mapping[str, object],
+    ) -> Future[object]:
+        with self._accept_lock:
+            return self._submit(session_id, action, payload)
+
+    def _submit(
         self,
         session_id: str,
         action: LiveAction | str,
@@ -529,6 +616,23 @@ class LiveLabOrchestrator:
             "verification_state": verification_state,
         }
         if record.mystery:
+            observed = rekey_data["observed"]
+            assert isinstance(observed, dict)
+            evidence = observed.get("evidence")
+            if isinstance(evidence, list):
+                observed["evidence"] = [
+                    value
+                    for value in evidence
+                    if not (
+                        isinstance(value, str)
+                        and value.startswith(
+                            (
+                                "pfs_configured=",
+                                "expected_rekey_proposal_selected=",
+                            )
+                        )
+                    )
+                ]
             rekey_data["configuration_withheld"] = True
         else:
             rekey_data["configured"] = {
@@ -626,15 +730,11 @@ class LiveLabOrchestrator:
             "session analysis completed from sealed evidence",
         )
         ready = replace(ready, analysis_available=True)
-        public_envelope = deepcopy(envelope)
-        if record.mystery:
-            public_analysis = public_envelope.get("analysis")
-            if isinstance(public_analysis, dict):
-                public_analysis["controlled_evidence"] = {
-                    "available": True,
-                    "source": "controlled-lab-artifacts",
-                    "withheld_until_reveal": True,
-                }
+        public_envelope = (
+            _public_mystery_envelope(envelope)
+            if record.mystery
+            else deepcopy(envelope)
+        )
         record.store.append(
             "analysis.completed",
             ready.state,
@@ -1058,12 +1158,32 @@ class LiveLabOrchestrator:
                 return False
             sas = record.session.refresh_sas()
             xfrm = record.session.collect_xfrm()
-            primary = getattr(record.session, "captures", {}).get("primary")
-            if primary is not None and not bool(primary.running):
-                return False
-            return bool(sas) and bool(xfrm)
+            self._validate_tunnel_evidence(record, sas, xfrm)
+            return True
         except BaseException:
             return False
+
+    def _validate_tunnel_evidence(
+        self,
+        record: _SessionRecord,
+        sas: Mapping[str, str],
+        xfrm: Mapping[str, str],
+    ) -> None:
+        scenario = record.session.scenario
+        if scenario is None:
+            raise RuntimeError("scenario is unavailable during tunnel validation")
+        verification = evaluate_tunnel(
+            dict(sas),
+            dict(xfrm),
+            run_id=record.store.snapshot.session_id,
+            scenario=scenario,
+        )
+        if verification.status != "PASS":
+            failed = [check.name for check in verification.checks if not check.passed]
+            raise RuntimeError("tunnel evidence failed: " + ", ".join(failed))
+        primary = getattr(record.session, "captures", {}).get("primary")
+        if primary is None or not bool(getattr(primary, "running", False)):
+            raise RuntimeError("full-session capture is not running")
 
     def _connect(self, record: _SessionRecord) -> None:
         self._change_state(
@@ -1143,6 +1263,11 @@ class LiveLabOrchestrator:
         self._initiate_with_log_observations(record)
         record.session.wait_for_sa()
         record.session.collect_xfrm()
+        self._validate_tunnel_evidence(
+            record,
+            record.session.sas,
+            record.session.xfrm,
+        )
         if record.store.snapshot.state is SessionState.IKE_NEGOTIATING:
             self._change_state(
                 record,
@@ -1366,6 +1491,23 @@ class LiveLabOrchestrator:
             Path("/run/ipsec-sentinel") / record.store.snapshot.session_id
         ).resolve()
         runtime_paths: set[Path] = {runtime_root}
+        for gateway in ("gateway-a", "gateway-b"):
+            gateway_root = runtime_root / gateway
+            runtime_paths.add(gateway_root)
+            runtime_paths.update(
+                gateway_root / name
+                for name in ("charon.vici", "charon.pid", "charon.log")
+            )
+        capture_root = runtime_root / "capture"
+        runtime_paths.add(capture_root)
+        runtime_paths.update(
+            capture_root / name
+            for name in (
+                "full-evidence.pcap",
+                "cleartext-audit-gateway-a.pcap",
+                "cleartext-audit-gateway-b.pcap",
+            )
+        )
         pair_files = getattr(record.session.pair, "files", {})
         if isinstance(pair_files, Mapping):
             for files in pair_files.values():

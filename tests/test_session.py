@@ -35,6 +35,31 @@ class Pair(Action):
 
 
 class SecureSessionTest(unittest.TestCase):
+    def test_process_observer_is_wired_to_daemons_and_all_captures(self) -> None:
+        with TemporaryDirectory() as directory:
+            observed: list[tuple[str, int]] = []
+            observer = lambda role, pid: observed.append((role, pid))
+            session = SecureSession(
+                Path(directory),
+                StringIO(),
+                primary_capture_name="full-evidence.pcap",
+                process_observer=observer,
+            )
+
+            session.pair._process_observer("strongswan-gateway-a", 100)
+            for index, capture in enumerate(session.captures.values(), start=200):
+                capture._process_observer(capture._process_role, index)
+
+            self.assertEqual(
+                observed,
+                [
+                    ("strongswan-gateway-a", 100),
+                    ("tcpdump-primary", 200),
+                    ("tcpdump-gateway-a", 201),
+                    ("tcpdump-gateway-b", 202),
+                ],
+            )
+
     def test_dataset_and_phase_one_primary_capture_names_do_not_overlap_semantics(self) -> None:
         with TemporaryDirectory() as directory:
             phase_one = SecureSession(

@@ -5,7 +5,7 @@ import { describe, expect, it, vi } from 'vitest'
 
 import { AnalysisProvider, type AnalysisServices } from '../../app/AnalysisContext'
 import { LiveLabProvider } from '../../app/LiveLabContext'
-import type { LiveLabServices } from '../../lib/live/types'
+import type { LiveLabServices, LiveSession } from '../../lib/live/types'
 import { AppRoutes } from '../../app/routes'
 import { makeEnvelope } from '../../test/analysisFixture'
 
@@ -37,13 +37,18 @@ function labelPattern(value: string) {
   return new RegExp(value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i')
 }
 
-function renderApp(services: Partial<AnalysisServices> = {}, path = '/') {
+function renderApp(
+  services: Partial<AnalysisServices> = {},
+  path = '/',
+  liveOverrides: Partial<LiveLabServices> = {},
+) {
   const liveServices: LiveLabServices = {
     scenarios: async () => ({ scenarios: [], workloads: [] }),
     createSession: async () => { throw new Error('not used') },
     getSession: async () => { throw new Error('not used') },
     command: async () => undefined,
     subscribe: () => ({ close: () => undefined }),
+    ...liveOverrides,
   }
   return render(
     <MemoryRouter initialEntries={[path]}>
@@ -143,5 +148,44 @@ describe('guided analysis workspace shell', () => {
     renderApp({}, '/analysis/security')
     expect(await screen.findByRole('heading', { name: 'IPsec Sentinel' })).toBeVisible()
     expect(screen.queryByRole('heading', { name: 'Security findings' })).not.toBeInTheDocument()
+  })
+
+  it('keeps the session handle and disables exit while a Live Lab action is busy', async () => {
+    const user = userEvent.setup()
+    const busySession: LiveSession = {
+      session_id: 'SNT-BUSY0001',
+      display_name: 'Secure Baseline',
+      state: 'IKE_NEGOTIATING',
+      state_reason: 'strongSwan initiation started',
+      tunnel_status: 'INACTIVE',
+      capture_status: 'RUNNING',
+      cleanup_status: 'NOT_RUN',
+      active_action: 'CONNECT',
+      child_sa_established: false,
+      completed_workloads: [],
+      latest_completed_workload_sequence: null,
+      latest_event_id: 11,
+      analysis_available: false,
+      mystery: false,
+      revealed: false,
+      failure: null,
+      allowed_actions: [],
+    }
+    const command = vi.fn(async () => undefined)
+    renderApp({}, '/live', {
+      scenarios: async () => ({
+        scenarios: [{ id: 'secure-baseline', display_name: 'Secure Baseline', mystery: false }],
+        workloads: ['icmp'],
+      }),
+      createSession: async () => busySession,
+      command,
+    })
+
+    await user.click(await screen.findByRole('button', { name: 'Create lab session' }))
+
+    expect((await screen.findAllByText('SNT-BUSY0001')).length).toBeGreaterThan(0)
+    expect(screen.getByRole('button', { name: 'Exit lab' })).toBeDisabled()
+    expect(screen.getByRole('button', { name: 'Exit Live Lab' })).toBeDisabled()
+    expect(command).not.toHaveBeenCalled()
   })
 })
