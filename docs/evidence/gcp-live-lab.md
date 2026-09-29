@@ -88,3 +88,24 @@ Permanent ingress is limited to UDP/500 and UDP/4500 from the detected operator
 have ephemeral public IPv4 addresses, no attached service account or OAuth
 scopes, an allowlisted scenario label/tag, and a 15-minute shutdown watchdog.
 Changing operator egress invalidates this preview and requires a new digest.
+
+## Known limitation: cloud Video latency
+
+The retained secure-baseline cloud session proved VM lifecycle, readiness,
+NAT-T IKEv2, CHILD_SA and XFRM installation, tunnel activation, ICMP, live ESP
+observation, and complete disconnect/VM-stop cleanup. A separate CBC session
+also established its NAT-T IKE and CHILD SAs.
+
+The complete interactive flow currently stops at cloud Video validation on the
+`e2-micro` responder. All planned Video segments and bytes were received, but
+two middle segments experienced intermittent encrypted data-plane pauses; a
+four-second paced workload completed in approximately 24.8 seconds. The
+client-side outer capture had no missing ESP sequence numbers and zero kernel
+capture drops, but it cannot distinguish encrypted TCP retransmission or
+backpressure from responder scheduling or CPU starvation. Validation remains
+strict rather than accepting this anomalous duration.
+
+This is a cloud Video performance limitation, not evidence of an IKE,
+CHILD_SA, XFRM, NAT-T, ICMP, or cleanup failure. Determining the underlying
+cause would require a targeted responder-side TCP capture and CPU/scheduling
+telemetry; that investigation is intentionally deferred for the prototype.
