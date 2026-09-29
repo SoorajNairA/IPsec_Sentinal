@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
+import re
 from time import monotonic, sleep
 from typing import Mapping, Protocol
 
@@ -100,6 +102,7 @@ class GcpLabProvider:
     """Own one allowlisted GCP responder and the session's local cloud sandbox."""
 
     READY_MARKER = "IPSEC_SENTINEL_READY"
+    READY_MARKER_PATTERN = re.compile(r"IPSEC_SENTINEL_READY\s+(\d+)")
 
     def __init__(
         self,
@@ -252,6 +255,13 @@ class GcpLabProvider:
             raise TimeoutError("cloud responder did not reach RUNNING")
         assert description is not None
         address = self._public_address(description)
+        started_at = description.get("lastStartTimestamp")
+        if not isinstance(started_at, str):
+            raise RuntimeError("cloud responder start timestamp is unavailable")
+        try:
+            started_epoch = int(datetime.fromisoformat(started_at).timestamp())
+        except ValueError as error:
+            raise RuntimeError("cloud responder start timestamp is malformed") from error
         marker_deadline = monotonic() + self.config.health_timeout_seconds
         marker_seen = False
         while monotonic() < marker_deadline:
@@ -262,9 +272,16 @@ class GcpLabProvider:
                 ),
                 timeout=30,
             )
-            if isinstance(serial, dict) and self.READY_MARKER in str(serial.get("contents", "")):
-                marker_seen = True
-                break
+            if isinstance(serial, dict):
+                marker_times = tuple(
+                    int(match.group(1))
+                    for match in self.READY_MARKER_PATTERN.finditer(
+                        str(serial.get("contents", ""))
+                    )
+                )
+                if any(marker >= started_epoch for marker in marker_times):
+                    marker_seen = True
+                    break
             self._sleep(2)
         if not marker_seen:
             raise TimeoutError("cloud responder did not emit its neutral readiness marker")

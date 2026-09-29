@@ -14,7 +14,7 @@ from time import monotonic, sleep, time_ns
 from typing import Any, Callable, TextIO
 from urllib.request import Request, urlopen
 
-from ipsec_sentinel.artifacts import write_json_atomic
+from ipsec_sentinel.artifacts import write_json_atomic, write_text_atomic
 from ipsec_sentinel.command import run_checked
 from ipsec_sentinel.scenario import Scenario
 from ipsec_sentinel.strongswan import GatewayFiles, RekeyEvidence
@@ -64,6 +64,14 @@ class CloudEndpointClient:
         request_path = self.run_dir / f"remote-request-{self._sequence:04d}.json"
         response_path = self.run_dir / f"remote-response-{self._sequence:04d}.json"
         write_json_atomic(request_path, {} if payload is None else payload)
+        environment = os.environ.copy()
+        package_root = str(Path(__file__).resolve().parents[2])
+        existing_pythonpath = environment.get("PYTHONPATH")
+        environment["PYTHONPATH"] = (
+            package_root
+            if not existing_pythonpath
+            else package_root + os.pathsep + existing_pythonpath
+        )
         started = time_ns()
         try:
             run_checked(
@@ -78,6 +86,7 @@ class CloudEndpointClient:
                 ],
                 self.timeout + 5,
                 self.log,
+                env=environment,
             )
             value = json.loads(response_path.read_text(encoding="utf-8"))
             if not isinstance(value, dict):
@@ -93,6 +102,15 @@ class CloudEndpointClient:
 
     def evidence(self) -> RemoteEvidence:
         payload = self.request("GET", "/v1/evidence")
+        write_text_atomic(
+            self.run_dir / "remote-swanctl.txt", str(payload.get("swanctl", ""))
+        )
+        write_text_atomic(
+            self.run_dir / "remote-xfrm-state.txt", str(payload.get("xfrm_state", ""))
+        )
+        write_text_atomic(
+            self.run_dir / "remote-xfrm-policy.txt", str(payload.get("xfrm_policy", ""))
+        )
         return RemoteEvidence(
             str(payload.get("swanctl", "")),
             "STATE\n" + str(payload.get("xfrm_state", ""))

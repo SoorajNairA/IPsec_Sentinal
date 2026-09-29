@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import io
 from pathlib import Path
 import struct
 import subprocess
@@ -10,6 +11,7 @@ import unittest
 from unittest.mock import patch
 
 from ipsec_sentinel.cloud.config import GcpLabConfig
+from ipsec_sentinel.cloud.ipsec import CloudEndpointClient
 from ipsec_sentinel.cloud.gcloud import GcloudClient
 from ipsec_sentinel.cloud.manifest import (
     APPROVED_MANIFEST,
@@ -19,8 +21,10 @@ from ipsec_sentinel.cloud.manifest import (
 )
 from ipsec_sentinel.cloud.natt import normalize_natt_workload
 from ipsec_sentinel.dataset.models import WorkloadWindow
+from ipsec_sentinel.evidence import parse_xfrm
 from ipsec_sentinel.live.provider import GcpLabProvider, ProviderEndpoint
 from ipsec_sentinel.pcap import PcapFormatError, inspect_ml_pcap
+from ipsec_sentinel.scenario import negotiated_policy
 from tests.pcap_helpers import ethernet_ipv4, write_pcap
 
 
@@ -40,6 +44,69 @@ def _config(root: Path) -> GcpLabConfig:
 
 
 class GcpPrototypeTest(unittest.TestCase):
+    def test_endpoint_helper_is_importable_inside_network_namespace(self) -> None:
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            token = root / "token"
+            ca = root / "ca.pem"
+            token.write_text("x" * 32, encoding="utf-8")
+            ca.write_text("test-ca", encoding="utf-8")
+            observed: dict[str, object] = {}
+
+            def run(argv: list[str], _timeout: float, _log: object, **kwargs: object):
+                observed.update(kwargs)
+                output = Path(argv[argv.index("--output") + 1])
+                output.write_text('{"status":"ok"}\n', encoding="utf-8")
+                return SimpleNamespace(stdout="", stderr="")
+
+            client = CloudEndpointClient(
+                root,
+                io.StringIO(),
+                token_file=token,
+                ca_file=ca,
+                session_nonce="n" * 64,
+            )
+            with patch("ipsec_sentinel.cloud.ipsec.run_checked", side_effect=run):
+                self.assertEqual(client.health(), {"status": "ok"})
+
+            environment = observed.get("env")
+            self.assertIsInstance(environment, dict)
+            package_root = str(Path(__file__).resolve().parent.parent)
+            self.assertEqual(str(environment["PYTHONPATH"]).split(":", 1)[0], package_root)
+
+    def test_cloud_xfrm_accepts_reciprocal_dynamic_outer_addresses(self) -> None:
+        text = """STATE
+src 172.31.254.2 dst 34.100.156.168
+\tproto esp spi 0xcb84c5f4 reqid 1 mode tunnel
+\taead rfc4106(gcm(aes)) 0x00 128
+src 34.100.156.168 dst 172.31.254.2
+\tproto esp spi 0xc1da4d07 reqid 1 mode tunnel
+\taead rfc4106(gcm(aes)) 0x00 128
+POLICY
+src 10.10.0.0/24 dst 10.20.0.0/24
+\tdir out priority 1 ptype main
+\ttmpl src 172.31.254.2 dst 34.100.156.168
+\t\tproto esp spi 0xcb84c5f4 reqid 1 mode tunnel
+src 10.20.0.0/24 dst 10.10.0.0/24
+\tdir fwd priority 1 ptype main
+\ttmpl src 34.100.156.168 dst 172.31.254.2
+\t\tproto esp reqid 1 mode tunnel
+src 10.20.0.0/24 dst 10.10.0.0/24
+\tdir in priority 1 ptype main
+\ttmpl src 34.100.156.168 dst 172.31.254.2
+\t\tproto esp reqid 1 mode tunnel
+"""
+        sa = SimpleNamespace(spis=("c1da4d07", "cb84c5f4"))
+        evidence = parse_xfrm(
+            text,
+            "gateway-a",
+            sa,
+            negotiated_policy("aes128-gcm"),
+            allow_dynamic_outer=True,
+        )
+        self.assertTrue(evidence.state_valid)
+        self.assertTrue(evidence.policy_valid)
+
     def test_resource_plan_is_fixed_and_natt_only(self) -> None:
         commands = (
             *render_creation_commands(APPROVED_MANIFEST, "8.8.8.8/32"),

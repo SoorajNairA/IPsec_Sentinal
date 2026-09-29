@@ -95,6 +95,8 @@ def parse_xfrm(
     gateway: str | None = None,
     sa: SaEvidence | None = None,
     policy: NegotiatedPolicy | None = None,
+    *,
+    allow_dynamic_outer: bool = False,
 ) -> XfrmEvidence:
     state_text, marker, policy_text = text.partition("POLICY")
     if not marker:
@@ -109,12 +111,30 @@ def parse_xfrm(
     states = _parse_xfrm_states(state_text)
     policies = _parse_xfrm_policies(policy_text)
     spi_in, spi_out = sa.spis if sa is not None else (None, None)
-    state_valid = all(
-        (
-            _has_state(states, outer_local, outer_remote, "out", spi_out, policy),
-            _has_state(states, outer_remote, outer_local, "in", spi_in, policy),
+    if allow_dynamic_outer:
+        reciprocal_pairs = tuple(
+            (state.source, state.destination)
+            for state in states
+            if _has_state(
+                states, state.source, state.destination, "out", spi_out, policy,
+                allow_missing_direction=True,
+            )
+            and _has_state(
+                states, state.destination, state.source, "in", spi_in, policy,
+                allow_missing_direction=True,
+            )
+            and state.source != state.destination
         )
-    )
+        state_valid = len(reciprocal_pairs) == 1
+        if state_valid:
+            outer_local, outer_remote = reciprocal_pairs[0]
+    else:
+        state_valid = all(
+            (
+                _has_state(states, outer_local, outer_remote, "out", spi_out, policy),
+                _has_state(states, outer_remote, outer_local, "in", spi_in, policy),
+            )
+        )
     policy_valid = all(
         (
             _has_policy(
@@ -198,6 +218,8 @@ def _sa_xfrm_checks(
     sas: dict[str, str],
     xfrm: dict[str, str],
     scenario: Scenario | None = None,
+    *,
+    allow_dynamic_outer: bool = False,
 ) -> list[Check]:
     checks: list[Check] = []
     policy = negotiated_policy(scenario or "secure-baseline")
@@ -247,7 +269,10 @@ def _sa_xfrm_checks(
                 ),
             )
         )
-        parsed_xfrm = parse_xfrm(xfrm.get(gateway, ""), gateway, sa, policy)
+        parsed_xfrm = parse_xfrm(
+            xfrm.get(gateway, ""), gateway, sa, policy,
+            allow_dynamic_outer=allow_dynamic_outer,
+        )
         checks.extend(
             (
                 _check(f"xfrm.state.{gateway}", parsed_xfrm.state_valid, "native ESP tunnel state"),
@@ -290,8 +315,14 @@ def _verification(run_id: str, checks: list[Check]) -> Verification:
 def evaluate_tunnel(
     sas: dict[str, str], xfrm: dict[str, str], *, run_id: str = "",
     scenario: Scenario | None = None,
+    allow_dynamic_outer: bool = False,
 ) -> Verification:
-    return _verification(run_id, _sa_xfrm_checks(sas, xfrm, scenario))
+    return _verification(
+        run_id,
+        _sa_xfrm_checks(
+            sas, xfrm, scenario, allow_dynamic_outer=allow_dynamic_outer
+        ),
+    )
 
 
 def evaluate_ipsec(
@@ -303,9 +334,16 @@ def evaluate_ipsec(
     pfs: PfsObservation | None = None,
     scenario: Scenario | None = None,
     allow_natt: bool = False,
+    allow_dynamic_outer: bool = False,
 ) -> Verification:
     checks = list(
-        evaluate_tunnel(sas, xfrm, run_id=run_id, scenario=scenario).checks
+        evaluate_tunnel(
+            sas,
+            xfrm,
+            run_id=run_id,
+            scenario=scenario,
+            allow_dynamic_outer=allow_dynamic_outer,
+        ).checks
     )
     checks.extend(_capture_checks(capture, allow_natt=allow_natt))
     if pfs is not None:
@@ -462,13 +500,18 @@ def _has_state(
     direction: str,
     spi: str | None,
     policy: NegotiatedPolicy | None = None,
+    *,
+    allow_missing_direction: bool = False,
 ) -> bool:
     expected_spi = _normalize_spi(spi)
     policy = policy or negotiated_policy("secure-baseline")
     return any(
         state.source == source
         and state.destination == destination
-        and state.direction == direction
+        and (
+            state.direction == direction
+            or (allow_missing_direction and state.direction == "")
+        )
         and state.protocol == "esp"
         and state.mode == "tunnel"
         and (

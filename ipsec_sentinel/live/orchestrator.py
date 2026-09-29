@@ -811,6 +811,7 @@ class LiveLabOrchestrator:
             run_id=record.store.snapshot.session_id,
             scenario=scenario,
             allow_natt=record.session.cloud_mode,
+            allow_dynamic_outer=record.session.cloud_mode,
         )
         if verification.status != "PASS":
             failed = [check.name for check in verification.checks if not check.passed]
@@ -1263,6 +1264,7 @@ class LiveLabOrchestrator:
             dict(xfrm),
             run_id=record.store.snapshot.session_id,
             scenario=scenario,
+            allow_dynamic_outer=record.session.cloud_mode,
         )
         if verification.status != "PASS":
             failed = [check.name for check in verification.checks if not check.passed]

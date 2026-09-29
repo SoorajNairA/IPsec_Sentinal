@@ -150,6 +150,30 @@ def render_post_provision_commands(
     )
 
 
+def render_source_update_commands(
+    manifest: GcpDeploymentManifest,
+    source_cidr: str,
+) -> tuple[CloudCommand, ...]:
+    return (
+        CloudCommand(
+            "update source-restricted IKE and NAT-T ingress",
+            (
+                "compute", "firewall-rules", "update", UDP_FIREWALL,
+                f"--source-ranges={source_cidr}",
+            ),
+        ),
+        CloudCommand(
+            "temporarily allow source-restricted provisioning SSH",
+            (
+                "compute", "firewall-rules", "create", SSH_FIREWALL,
+                f"--network={manifest.network}", "--direction=INGRESS",
+                "--action=ALLOW", "--rules=tcp:22",
+                f"--source-ranges={source_cidr}", f"--target-tags={VPN_TAG}",
+            ),
+        ),
+    )
+
+
 def render_rollback_commands(
     manifest: GcpDeploymentManifest,
 ) -> tuple[CloudCommand, ...]:
@@ -275,11 +299,19 @@ def inspect_deployment(
     if isinstance(firewall, dict):
         present.append(UDP_FIREWALL)
         allowed = firewall.get("allowed")
+        allowed_rules = {
+            (str(rule.get("IPProtocol")), tuple(str(port) for port in rule.get("ports", ())))
+            for rule in allowed
+            if isinstance(rule, dict) and isinstance(rule.get("ports"), list)
+        } if isinstance(allowed, list) else set()
         ranges = firewall.get("sourceRanges")
         target_tags = firewall.get("targetTags")
         if (
             ranges != [source_cidr]
-            or allowed != [{"IPProtocol": "udp", "ports": ["500", "4500"]}]
+            or allowed_rules not in (
+                {("udp", ("500", "4500"))},
+                {("udp", ("500",)), ("udp", ("4500",))},
+            )
             or target_tags != [VPN_TAG]
             or not str(firewall.get("network", "")).endswith("/" + manifest.network)
         ):

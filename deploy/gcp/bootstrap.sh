@@ -18,7 +18,8 @@ done
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends \
-  strongswan-swanctl strongswan-charon-systemd strongswan-libcharon \
+  strongswan-swanctl charon-systemd strongswan-libcharon \
+  libstrongswan-standard-plugins \
   iproute2 iptables tcpdump python3 ca-certificates
 
 install -d -m 0755 /opt/ipsec-sentinel
@@ -107,17 +108,8 @@ install -m 0644 /tmp/ipsec-sentinel-bundle/deploy/gcp/ipsec-sentinel-endpoint.se
 install -m 0644 /tmp/ipsec-sentinel-bundle/deploy/gcp/ipsec-sentinel-watchdog.service /etc/systemd/system/
 install -m 0644 /tmp/ipsec-sentinel-bundle/deploy/gcp/ipsec-sentinel-watchdog.timer /etc/systemd/system/
 
-cat > /usr/local/sbin/ipsec-sentinel-ready <<'EOF'
-#!/bin/sh
-set -eu
-systemctl is-active --quiet strongswan
-systemctl is-active --quiet ipsec-sentinel-endpoint
-ip netns exec ips-server ip route show 10.10.0.0/24 | grep -q 'via 10.20.0.1'
-test "$(sysctl -n net.ipv4.ip_forward)" = 1
-test "$(sysctl -n net.ipv4.conf.all.rp_filter)" = 0
-printf 'IPSEC_SENTINEL_READY\n' > /dev/ttyS0
-EOF
-chmod 0755 /usr/local/sbin/ipsec-sentinel-ready
+install -m 0755 /tmp/ipsec-sentinel-bundle/deploy/gcp/ipsec-sentinel-ready \
+  /usr/local/sbin/ipsec-sentinel-ready
 
 cat > /etc/systemd/system/ipsec-sentinel-ready.service <<'EOF'
 [Unit]

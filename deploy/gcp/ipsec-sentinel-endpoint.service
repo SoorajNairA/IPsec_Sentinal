@@ -2,6 +2,8 @@
 Description=IPsec Sentinel protected cloud endpoint
 After=strongswan.service ipsec-sentinel-topology.service
 Requires=ipsec-sentinel-topology.service
+StartLimitIntervalSec=60
+StartLimitBurst=3
 
 [Service]
 Type=simple
@@ -10,8 +12,7 @@ Environment=PYTHONPATH=/opt/ipsec-sentinel
 ExecStart=/usr/bin/python3 -m ipsec_sentinel.cloud.endpoint --address 10.20.0.1 --port 8443 --token-file /etc/ipsec-sentinel/control-token --cert /etc/ipsec-sentinel/endpoint.crt --key /etc/ipsec-sentinel/endpoint.key
 Restart=on-failure
 RestartSec=2
-StartLimitIntervalSec=60
-StartLimitBurst=3
+RuntimeDirectory=ipsec-sentinel-endpoint
 NoNewPrivileges=true
 PrivateTmp=true
 ProtectHome=true

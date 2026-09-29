@@ -61,22 +61,39 @@ def main(argv: list[str] | None = None) -> int:
             client.run(("compute", "instances", "start", instance, f"--zone={config.zone}"), timeout=300)
             client.run(
                 (
+                    "compute", "ssh", instance, f"--zone={config.zone}",
+                    "--strict-host-key-checking=no",
+                    "--command=sudo install -d -m 0755 -o " + config.operator
+                    + " -g " + config.operator
+                    + " /tmp/ipsec-sentinel-bundle /tmp/ipsec-sentinel-secrets",
+                ),
+                timeout=300,
+            )
+            client.run(
+                (
                     "compute", "scp", "--recurse",
                     str(repository / "ipsec_sentinel"), str(repository / "deploy"),
                     f"{instance}:/tmp/ipsec-sentinel-bundle", f"--zone={config.zone}",
+                    "--strict-host-key-checking=no",
                 ),
                 timeout=600,
             )
             client.run(
                 (
-                    "compute", "scp", "--recurse", str(secrets),
+                    "compute", "scp",
+                    str(secrets / "psk"),
+                    str(secrets / "control-token"),
+                    str(secrets / "endpoint.crt"),
+                    str(secrets / "endpoint.key"),
                     f"{instance}:/tmp/ipsec-sentinel-secrets", f"--zone={config.zone}",
+                    "--strict-host-key-checking=no",
                 ),
                 timeout=300,
             )
             client.run(
                 (
                     "compute", "ssh", instance, f"--zone={config.zone}",
+                    "--strict-host-key-checking=no",
                     "--command=sudo /bin/sh /tmp/ipsec-sentinel-bundle/deploy/gcp/bootstrap.sh " + scenario,
                 ),
                 timeout=900,
